@@ -1,0 +1,7 @@
+# Your personal dictionary. One rule per line:
+#
+#     what you say  =>  what gets typed
+#
+# Lines starting with # are ignored. Save the file (or use the Hub window)
+# and the app picks up changes on your next dictation.
+

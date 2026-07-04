@@ -1,0 +1,3 @@
+# This folder holds the speech models. They are downloaded by setup.ps1
+# (Moonshine ASR + Silero VAD) and generated at first run (sound cues,
+# app icon). Nothing here is committed to git — see ../.gitignore.

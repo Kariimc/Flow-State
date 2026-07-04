@@ -1,0 +1,22 @@
+# Python virtual environment (recreate with setup.ps1)
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / tooling local state
+.claude/
+.vscode/
+.idea/
+
+# Personal & generated runtime data — never commit
+history.txt
+settings.json
+overlay_pos.txt
+
+# Models: downloaded or generated at runtime (see setup.ps1 / README)
+models/*
+!models/.gitkeep
+
+# Scratch / test artifacts
+_*
+*.log
