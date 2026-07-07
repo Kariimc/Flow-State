@@ -44,9 +44,29 @@ shortcut "Whisper Flow.lnk" -> `flow.py --hub`, generated models/flow.ico.
 NOTE: uv-venv pythonw.exe is a stub that spawns the real python.exe —
 process checks must look at python.exe, not the stub.
 
+## New laptop (2026-07-06)
+Migrated to a much stronger box. Profile:
+- CPU: 12th Gen Intel Core i5-1245U, 10 physical cores (2P+8E) / 12 threads.
+- **AVX2: SUPPORTED** (old Pentium Gold 5405U had none — the single fact the
+  whole engine choice hinged on). AVX also present.
+- RAM: 15.65 GB (was 3.8 GB). GPU: Intel Iris Xe (iGPU, usable for small models).
+Setup done end-to-end here: uv 0.11.26 installed via winget (not yet on this
+shell's PATH — winget updated persistent user PATH, needs a new terminal),
+git 2.55 + gh 2.96 already present, gh authed as Kariimc. `.venv` on Python
+3.12.10, 35 pkgs, both models downloaded. App launched, warmed up, Ready
+(340 MB RAM, socket 47821 bound, cues+icon generated).
+Implication of AVX2: faster-whisper/CTranslate2 now runs at full speed (was
+~35 s/4 s clip on the old box). small/distil-whisper for accuracy, and a
+local-LLM "deep clean" in the clean_text seam, are both now viable —
+pending user sign-off before changing ENGINE.
+No personal data migrated: history.txt/settings.json absent, dictionary.txt
+is the committed template only. User must bring dictionary.txt from old laptop.
+
 ## Next action
-Roadmap "next" row: settings UI (avoid editing flow.py) and/or per-app
-tone profiles. User drives feature picks from RESEARCH.md roadmap.
+Awaiting user's live dictation test (hold Ctrl+Win, speak into Notepad).
+Then: engine tuning decision (Moonshine vs faster-whisper small vs local-LLM
+clean pass) with user sign-off. Roadmap "next" row: settings UI and/or
+per-app tone profiles. User drives feature picks from RESEARCH.md roadmap.
 
 ## Gotchas
 - `keyboard` lib hotkey uses suppress=True on F8; Esc double-tap quits.
@@ -55,3 +75,11 @@ tone profiles. User drives feature picks from RESEARCH.md roadmap.
 - Don't run two instances (mic + hotkey conflict).
 - TTS smoke-test trick: SAPI SpFileStream (format type 22 = 22.05 kHz,
   needs resample to 16 k in tests).
+- Status prints use "●"/"→". Under a REDIRECTED/piped stdout Windows picks
+  cp1252 (strict) not UTF-8, so those chars raise UnicodeEncodeError and
+  silently KILL the recording/finish worker thread — symptom: start cue
+  plays, then no text + hang. A real console is UTF-8 so it only bites
+  headless/logged launches. Fixed: main() reconfigures stdout/stderr to
+  utf-8, errors="replace" before any print.
+- Overlay state indicator is now a vector mic glyph (Overlay._mic list of
+  (item, colour-option) pairs), recoloured per state — not the old dot.

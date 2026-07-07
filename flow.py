@@ -881,8 +881,20 @@ class Overlay:
         for gx in range(26, self.W - 10, 11):
             self.canvas.create_line(gx, 4, gx, self.H - 4, fill=HAIRLINE)
         self.canvas.create_line(20, mid, self.W - 7, mid, fill=HAIRLINE)
-        self.dot = self.canvas.create_oval(9, mid - 3, 15, mid + 3,
-                                           fill=self.DOTS["idle"], outline="")
+        # microphone glyph (state indicator) — crisp vector art in place of the
+        # old status dot. Recolours by state; drawn once, never rebuilt.
+        cx, _c = 11.0, self.DOTS["idle"]
+        self._mic = [                                      # (item, colour option)
+            (self.canvas.create_oval(cx - 2.4, 4, cx + 2.4, 13,
+                                     fill=_c, outline=""), "fill"),      # capsule
+            (self.canvas.create_arc(cx - 4.5, 6, cx + 4.5, 16,
+                                    start=180, extent=180, style=tk.ARC,
+                                    outline=_c, width=1.3), "outline"),  # cradle
+            (self.canvas.create_line(cx, 16, cx, 19.5,
+                                     fill=_c, width=1.3), "fill"),       # stem
+            (self.canvas.create_line(cx - 3, 20, cx + 3, 20,
+                                     fill=_c, width=1.3), "fill"),       # base
+        ]
         # six octave curves + their little plotted-endpoint squares
         self.xs = list(range(21, self.W - 6, 4))
         self.k2pi = [2 * math.pi * c / len(self.xs) for c in self.CURVE_CYCLES]
@@ -1000,7 +1012,8 @@ class Overlay:
         self.state = state
         self.fading = False
         self.idle_since = time.time() if state == "idle" else None
-        self.canvas.itemconfig(self.dot, fill=self.DOTS[state])
+        for item, opt in self._mic:
+            self.canvas.itemconfig(item, {opt: self.DOTS[state]})
         try:
             self.root.attributes("-alpha", 1.0)
         except tk.TclError:
@@ -1377,6 +1390,15 @@ class Hub:
 
 def main() -> None:
     global vad_enabled, ACTIVE_ENGINE
+    # Status prints use "●"/"→". Under a redirected/piped stdout Windows
+    # picks cp1252 (strict), so those chars raise UnicodeEncodeError and silently
+    # kill the recording/finish worker threads. Force UTF-8 with replacement so a
+    # print can never take a thread (and the dictation) down.
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     want_hub = "--hub" in sys.argv
     if not ipc_server():
         # another copy is already running — ask it to show its Hub instead
