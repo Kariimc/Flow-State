@@ -1,7 +1,8 @@
 # PROGRESS
 
 ## What this is
-Local Wispr Flow clone for Windows (`flow.py`). 100% offline dictation:
+Flow State — a local, Wispr-Flow-inspired dictation app for Windows
+(`flow.py`). 100% offline dictation:
 hold/tap F8 → speak → text pasted into the active window.
 
 ## Current state (2026-07-02)
@@ -40,7 +41,7 @@ mode (Ctrl+Win+Space, injects per segment), Hub window (history click-to-
 copy, search, inline dictionary editing, Options tab -> settings.json,
 live-apply except ENGINE/HOTKEY), single-instance via socket 47821 (2nd
 launch = "open hub" IPC), autostart HKCU Run key (pythonw), desktop
-shortcut "Whisper Flow.lnk" -> `flow.py --hub`, generated models/flow.ico.
+shortcut "Flow State.lnk" -> `flow.py --hub`, generated models/flow.ico.
 NOTE: uv-venv pythonw.exe is a stub that spawns the real python.exe —
 process checks must look at python.exe, not the stub.
 

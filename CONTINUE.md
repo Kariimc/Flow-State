@@ -33,7 +33,7 @@ below. It's written to make the agent orient itself, prove the app actually
 works on this machine before touching anything, and only then move on to
 features — in that order, so nothing gets built on a broken base.
 
-> I'm picking up the **Whisper Flow clone** (`flow.py`) on a **new Windows
+> I'm picking up **Flow State** (`flow.py`) on a **new Windows
 > laptop**. It's a local, fully-offline voice-dictation app. Do the following
 > in order and stop to tell me if any step fails before moving on.
 >

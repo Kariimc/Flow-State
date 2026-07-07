@@ -1,4 +1,4 @@
-# Whisper Flow Clone
+# Flow State
 
 Local voice dictation for Windows. Hold or tap **Ctrl+Win**, speak, and the
 text appears in whatever window you're using. Everything runs on your PC —
@@ -16,7 +16,7 @@ Do it once. After that, use `run.bat`.
 ## Run it
 
 It starts by itself when Windows boots (grey microphone in the system
-tray). The **Whisper Flow icon on your Desktop** opens the Hub — history,
+tray). The **Flow State icon on your Desktop** opens the Hub — history,
 dictionary, and an Options tab for tweaks (hotkey, engine, verbatim mode,
 auto-stop timing, "start with Windows" on/off). Manual start:
 

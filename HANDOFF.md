@@ -1,4 +1,4 @@
-# Whisper Flow Clone — Engineering Handoff
+# Flow State — Engineering Handoff
 
 A local, offline voice-dictation app for Windows in the spirit of Wispr Flow.
 Hold or tap a hotkey, speak, and the text is inserted into whatever window has
@@ -32,7 +32,7 @@ Use it: hold or tap **Ctrl+Win**, speak, release. Text appears at your cursor.
   you press it again.
 - **Esc twice** quickly = quit.
 
-The desktop shortcut ("Whisper Flow") opens the **Hub** (History, Dictionary,
+The desktop shortcut ("Flow State") opens the **Hub** (History, Dictionary,
 Options). The app also lives in the system tray and starts with Windows.
 
 ---

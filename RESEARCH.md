@@ -1,4 +1,4 @@
-# Research: How Wispr Flow Works & What Our Clone Needs
+# Research: How Wispr Flow Works & What Flow State Needs
 
 *Compiled 2026-07-02 from four parallel research passes (product docs, technical
 architecture, open-source landscape, hardware feasibility) plus community

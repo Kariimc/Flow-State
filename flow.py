@@ -1,4 +1,4 @@
-"""Whisper Flow clone — press a hotkey, speak, and the text appears in
+"""Flow State — press a hotkey, speak, and the text appears in
 whatever window you're using. Runs 100% locally.
 
 Dictate with the same keys, three ways (defaults):
@@ -265,7 +265,7 @@ DICT = Dictionary(os.path.join(BASE_DIR, DICTIONARY_FILE))
 # ------------------------------------------------- autostart & one instance
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-APP_NAME = "WhisperFlowClone"
+APP_NAME = "FlowState"
 IPC_PORT = 47821
 
 
@@ -803,8 +803,8 @@ def start_tray() -> None:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", lambda icon, item: ui_events.put("quit")),
     )
-    TRAY = pystray.Icon("whisper-flow-clone", TRAY_ICONS["idle"],
-                        "Whisper Flow Clone", menu)
+    TRAY = pystray.Icon("flow-state", TRAY_ICONS["idle"],
+                        "Flow State", menu)
     TRAY.run_detached()
 
 
@@ -1128,7 +1128,7 @@ class Hub:
 
     def __init__(self, root):
         self.top = tk.Toplevel(root)
-        self.top.title("Flow Hub")
+        self.top.title("Flow State — Hub")
         self.top.geometry("580x570")
         self.top.configure(bg=PAPER)
         self.top.minsize(500, 420)

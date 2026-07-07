@@ -1,4 +1,4 @@
-# One-shot setup for the Whisper Flow clone.
+# One-shot setup for Flow State.
 # Creates the Python environment and downloads the speech models.
 # Run from this folder:   powershell -ExecutionPolicy Bypass -File setup.ps1
 
