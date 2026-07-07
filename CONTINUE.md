@@ -1,7 +1,7 @@
 # Continuing on a new machine
 
 Everything needed to pick this project up on another Windows PC. The code is on
-GitHub (private): **github.com/Kariimc/whisper-flow-clone**.
+GitHub (private): **github.com/Kariimc/flow-state**.
 
 ## 1. Install the prerequisites
 
@@ -15,8 +15,8 @@ GitHub (private): **github.com/Kariimc/whisper-flow-clone**.
 
 ```powershell
 gh auth login                              # sign in as Kariimc
-gh repo clone Kariimc/whisper-flow-clone
-cd whisper-flow-clone
+gh repo clone Kariimc/flow-state
+cd flow-state
 powershell -ExecutionPolicy Bypass -File setup.ps1   # builds .venv, downloads models
 .\run.bat
 ```
@@ -28,7 +28,7 @@ rules are NOT in the repo (git-ignored) — they stay on the old laptop. Copy
 
 ## 3. Resume with Claude Code
 
-Open Claude Code in the `whisper-flow-clone` folder and paste the kickoff prompt
+Open Claude Code in the `flow-state` folder and paste the kickoff prompt
 below. It's written to make the agent orient itself, prove the app actually
 works on this machine before touching anything, and only then move on to
 features — in that order, so nothing gets built on a broken base.
