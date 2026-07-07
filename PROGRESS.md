@@ -62,11 +62,45 @@ pending user sign-off before changing ENGINE.
 No personal data migrated: history.txt/settings.json absent, dictionary.txt
 is the committed template only. User must bring dictionary.txt from old laptop.
 
+## Live dictation test (2026-07-06) — PASSED
+Hold-Ctrl+Win into Notepad, released, text inserted correctly. Waveform pill
+appeared. One bug found and fixed along the way (see Gotchas): redirected
+stdout crashed the recording thread on the "●"/"→" glyphs. Also replaced the
+status dot with a vector mic glyph. Both landed on main (f7bf9e7).
+
+## Engine benchmark on new laptop (2026-07-07)
+Ran all three candidate engines against the same 7.89s SAPI-TTS test clip
+(HANDOFF §7 method), transcript scored against the reference sentence:
+
+| engine                              | load  | infer | score | notes |
+|---|---|---|---|---|
+| Moonshine base int8 (current)       | 1.23s | 0.30s | 100%  | current default |
+| faster-whisper base int8 (AVX2)     | 1.16s | 2.32s | 100%  | ~8x slower than Moonshine |
+| faster-whisper small int8 (AVX2)    | 3.21s | 7.00s | 100%  | ~23x slower than Moonshine |
+
+**Recommendation: keep `ENGINE = "moonshine"`.** AVX2 makes faster-whisper
+usable now (vs. ~35s/4s-clip unusable on the old Pentium), but it's still an
+order of magnitude slower than Moonshine on this box for equal accuracy on
+English. faster-whisper stays valuable as the manual non-English fallback
+(LANGUAGE setting), which is its existing role — no code change needed, no
+ENGINE flip made (per user's sign-off gate).
+
+**Local-LLM "deep clean" pass** (HANDOFF §2, roadmap #2): now plausible with
+10 cores/16 GB/AVX2 headroom (Moonshine's 0.3s leaves plenty of room for a
+1-3s local 0.5-1B model call before it'd be noticeable), but it's a new
+dependency + new seam implementation, not a config flip — needs its own
+scoping/sign-off pass, not bundled into this benchmark. Not built yet.
+
+## Dictionary (2026-07-07)
+User has no dictionary.txt from the old laptop to migrate — nothing to
+restore. Verified the live-reload mechanism itself works correctly (scratch
+Dictionary instance, edited file, `.apply()` picked up the new rule with no
+restart) so it's ready whenever rules get added via the file or the Hub.
+
 ## Next action
-Awaiting user's live dictation test (hold Ctrl+Win, speak into Notepad).
-Then: engine tuning decision (Moonshine vs faster-whisper small vs local-LLM
-clean pass) with user sign-off. Roadmap "next" row: settings UI and/or
-per-app tone profiles. User drives feature picks from RESEARCH.md roadmap.
+Roadmap "next" row: settings UI and/or per-app tone profiles, or scope the
+local-LLM deep-clean pass if the user wants it built. User drives feature
+picks from RESEARCH.md roadmap.
 
 ## Gotchas
 - `keyboard` lib hotkey uses suppress=True on F8; Esc double-tap quits.
