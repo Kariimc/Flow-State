@@ -1182,20 +1182,20 @@ class Overlay:
         self.canvas.create_line(20, mid, self.W - 7, mid, fill=HAIRLINE)
         # microphone glyph (state indicator) â€” crisp vector art in place of the
         # old status dot. Recolours by state; drawn once, never rebuilt.
-        cx, _c = 11.0, self.DOTS["idle"]
-        # A compact badge leaves even breathing room inside the 26px pill.
-        self.canvas.create_oval(cx - 7, 6, cx + 7, 20,
+        cx, cy, _c = 11.0, mid, self.DOTS["idle"]
+        # A compact badge, centered inside the 26px pill.
+        self.canvas.create_oval(cx - 6.4, cy - 6.4, cx + 6.4, cy + 6.4,
                                 fill=PAPER_DIM, outline=HAIRLINE, width=1)
         self._mic = [                                      # (item, colour option)
-            (self.canvas.create_oval(cx - 1.6, 8, cx + 1.6, 13.5,
+            (self.canvas.create_oval(cx - 1.35, cy - 4.3, cx + 1.35, cy + 0.8,
                                      fill=_c, outline=""), "fill"),      # capsule
-            (self.canvas.create_arc(cx - 3.2, 10, cx + 3.2, 16.5,
+            (self.canvas.create_arc(cx - 2.9, cy - 2.1, cx + 2.9, cy + 3.7,
                                     start=180, extent=180, style=tk.ARC,
-                                    outline=_c, width=1.1), "outline"),  # cradle
-            (self.canvas.create_line(cx, 16.5, cx, 18,
-                                     fill=_c, width=1.1), "fill"),       # stem
-            (self.canvas.create_line(cx - 2.2, 18.2, cx + 2.2, 18.2,
-                                     fill=_c, width=1.1), "fill"),       # base
+                                    outline=_c, width=1.0), "outline"),  # cradle
+            (self.canvas.create_line(cx, cy + 3.7, cx, cy + 4.9,
+                                     fill=_c, width=1.0), "fill"),       # stem
+            (self.canvas.create_line(cx - 1.9, cy + 5.1, cx + 1.9, cy + 5.1,
+                                     fill=_c, width=1.0), "fill"),       # base
         ]
         # six octave curves + their little plotted-endpoint squares
         self.xs = list(range(21, self.W - 6, 4))
