@@ -1,10 +1,10 @@
-"""Flow State — press a hotkey, speak, and the text appears in
+"""Flow State â€” press a hotkey, speak, and the text appears in
 whatever window you're using. Runs 100% locally.
 
 Dictate with the same keys, three ways (defaults):
-  * HOLD Ctrl+Win  — speak while holding, release to finish
-  * TAP  Ctrl+Win  — recording stays on; stops after a pause or another tap
-  * Ctrl+Win+Space — continuous mode: the mic stays open and text flows in
+  * HOLD Ctrl+Win  â€” speak while holding, release to finish
+  * TAP  Ctrl+Win  â€” recording stays on; stops after a pause or another tap
+  * Ctrl+Win+Space â€” continuous mode: the mic stays open and text flows in
                      as you speak, until you press it again
 Press Esc twice quickly to quit.
 """
@@ -22,15 +22,29 @@ import tkinter as tk
 import winsound
 from collections import deque
 from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import keyboard
 import numpy as np
 import pyperclip
 import sounddevice as sd
 
+from flow_features import (
+    PROFILE_PRESETS,
+    HistoryStore,
+    apply_vocabulary,
+    choose_profile,
+    polish_text,
+    read_wav,
+    transform_selected_text,
+)
+from flow_hub import Hub as ModernHub
+
 # ---------------- settings you can change ----------------
 HOTKEY = "ctrl+windows"           # dictation key or combo (hold OR tap)
 CONTINUOUS_HOTKEY = "ctrl+windows+space"  # toggles open-mic continuous mode
+COMMAND_HOTKEY = "ctrl+windows+alt"       # selected-text voice command toggle
 ENGINE = "moonshine"    # "moonshine" (fast, English) or "whisper" (slower, any language)
 WHISPER_SIZE = "base"   # only used when ENGINE = "whisper"
 LANGUAGE = None         # only used with whisper: None = auto-detect, or e.g. "en"
@@ -44,13 +58,26 @@ IDLE_FADE = 60          # pill fades away after this many idle seconds
 HISTORY_FILE = "history.txt"        # every transcript is appended here ("" to disable)
 DICTIONARY_FILE = "dictionary.txt"  # your words & shortcuts, see the file itself
 TYPE_DELAY = 0.005      # only used when INJECTION = "type"
+POLISH = True           # local cleanup, self-correction, lists, and app profiles
+PROFILE = "auto"        # auto, default, messages, email, notes, or coding
+APP_PROFILES = {}       # optional {"process-name": "profile"} overrides
+MICROPHONE = None       # None = system default, otherwise a sounddevice index
+SOUND_CUES = True
+SAVE_AUDIO = True       # retain WAV audio beside searchable history
+HISTORY_DAYS = 30       # 0 = keep forever
+THEME = "light"         # light or dark Hub theme
+OPEN_HUB = False        # show the Hub after startup
 # ----------------------------------------------------------
 
 # settings.json (edited from the Hub's Options tab) overrides the defaults
 BASE_DIR_ = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE_DIR_, "settings.json")
-TWEAKABLE = ["HOTKEY", "CONTINUOUS_HOTKEY", "ENGINE", "INJECTION", "VERBATIM",
-             "AUTO_STOP", "MAX_RECORD", "IDLE_FADE"]
+TWEAKABLE = [
+    "HOTKEY", "CONTINUOUS_HOTKEY", "COMMAND_HOTKEY", "ENGINE", "INJECTION",
+    "VERBATIM", "AUTO_STOP", "MAX_RECORD", "IDLE_FADE", "POLISH", "PROFILE",
+    "APP_PROFILES", "MICROPHONE", "SOUND_CUES", "SAVE_AUDIO", "HISTORY_DAYS",
+    "THEME", "OPEN_HUB",
+]
 
 
 def load_settings() -> None:
@@ -85,6 +112,40 @@ BLOCK = 1600  # 0.1 s of audio per callback
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MOONSHINE_DIR = os.path.join(BASE_DIR, "models", "sherpa-onnx-moonshine-base-en-int8")
 VAD_MODEL = os.path.join(BASE_DIR, "models", "silero_vad.onnx")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+HISTORY = HistoryStore(DATA_DIR)
+
+
+def active_process_name() -> str:
+    """Return the foreground executable name using Windows APIs only."""
+    try:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        pid = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value
+        )
+        if not handle:
+            return ""
+        try:
+            size = ctypes.c_ulong(1024)
+            buf = ctypes.create_unicode_buffer(size.value)
+            if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                handle, 0, buf, ctypes.byref(size)
+            ):
+                return os.path.basename(buf.value)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+    return ""
+
+
+def current_profile() -> str:
+    if PROFILE in PROFILE_PRESETS:
+        return PROFILE
+    return choose_profile(active_process_name(), APP_PROFILES)
 
 
 def _label(combo: str) -> str:
@@ -96,12 +157,15 @@ def _label(combo: str) -> str:
 
 HOTKEY_LABEL = _label(HOTKEY)
 CONTINUOUS_LABEL = _label(CONTINUOUS_HOTKEY)
+COMMAND_LABEL = _label(COMMAND_HOTKEY)
 
 ui_events = queue.Queue()   # thread-safe channel to the overlay (main thread)
 preroll = deque(maxlen=max(1, int(PRE_ROLL * SAMPLE_RATE / BLOCK)))
 chunks = []
 recording = False
 continuous_mode = False
+command_mode = False
+command_selection = ""
 key_is_down = False
 press_time = 0.0
 busy = threading.Lock()
@@ -111,7 +175,7 @@ ACTIVE_ENGINE = None
 # ---------------------------------------------------------------- engines
 
 class MoonshineEngine:
-    """Moonshine base int8 via sherpa-onnx — ~14x faster than Whisper on
+    """Moonshine base int8 via sherpa-onnx â€” ~14x faster than Whisper on
     CPUs without AVX2, English only."""
 
     name = "Moonshine base (English)"
@@ -155,7 +219,7 @@ def load_engine():
     if ENGINE == "moonshine":
         if os.path.isdir(MOONSHINE_DIR):
             return MoonshineEngine()
-        print("Moonshine model folder missing (%s) — falling back to Whisper.\n"
+        print("Moonshine model folder missing (%s) â€” falling back to Whisper.\n"
               "See README.md for the model download command." % MOONSHINE_DIR)
     return WhisperEngine()
 
@@ -188,6 +252,14 @@ def clean_text(text: str) -> str:
     text = re.sub(r"[ \t]{2,}", " ", text)          # collapse double spaces
     text = re.sub(r"([,.;:?!])(?=\w)", r"\1 ", text)  # space after punctuation
     return text.strip()
+
+
+def finish_text(raw: str, profile: str | None = None) -> str:
+    text = DICT.apply(clean_text(raw))
+    text = apply_vocabulary(text, os.path.join(BASE_DIR, "vocabulary.txt"))
+    if POLISH and not VERBATIM:
+        text = polish_text(text, profile or current_profile())
+    return text
 
 
 # ---------------------------------------------------------------- dictionary
@@ -379,7 +451,7 @@ def make_icon() -> None:
 # ---------------------------------------------------------------- sounds
 
 def _make_cue(path: str, freqs, dur: float = 0.14, vol: float = 0.16) -> None:
-    """Write a soft sine chime (gentle fade in/out) — far kinder on the ears
+    """Write a soft sine chime (gentle fade in/out) â€” far kinder on the ears
     than winsound.Beep's harsh square wave."""
     import wave as wavemod
 
@@ -414,6 +486,8 @@ def make_cues() -> None:
 
 
 def beep(start: bool) -> None:
+    if not SOUND_CUES:
+        return
     path = CUE_START if start else CUE_STOP
     flags = winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
     try:
@@ -424,9 +498,9 @@ def beep(start: bool) -> None:
 
 # ---------------------------------------------------------------- output
 
-def inject(text: str) -> None:
+def inject(text: str, trailing_space: bool = True) -> None:
     # If the user is still holding the hotkey (or any modifier), a synthetic
-    # Ctrl+V would turn into Ctrl+Win+V etc. and paste nowhere — wait for
+    # Ctrl+V would turn into Ctrl+Win+V etc. and paste nowhere â€” wait for
     # their fingers to leave the keyboard first.
     deadline = time.time() + 2.0
     while time.time() < deadline and any(
@@ -435,15 +509,15 @@ def inject(text: str) -> None:
         time.sleep(0.03)
 
     if INJECTION == "type":
-        keyboard.write(text + " ", delay=TYPE_DELAY)
+        keyboard.write(text + (" " if trailing_space else ""), delay=TYPE_DELAY)
         return
     # Paste: put text on clipboard, Ctrl+V, then restore what was there.
     old = None
     try:
         old = pyperclip.paste()
     except Exception:
-        pass  # clipboard held an image or was locked — nothing to restore
-    pyperclip.copy(text + " ")
+        pass  # clipboard held an image or was locked â€” nothing to restore
+    pyperclip.copy(text + (" " if trailing_space else ""))
     keyboard.send("ctrl+v")
     if old is not None:
         # wait so even slow apps read the clipboard before we put it back
@@ -454,16 +528,36 @@ def inject(text: str) -> None:
             pass
 
 
-def log_history(text: str) -> None:
-    if not HISTORY_FILE:
-        return
-    path = os.path.join(BASE_DIR, HISTORY_FILE)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write("[%s] %s\n" % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), text))
+def log_history(
+    text: str,
+    *,
+    original: str = "",
+    audio: np.ndarray | None = None,
+    duration: float = 0.0,
+    latency: float = 0.0,
+    engine: str = "",
+    profile: str = "default",
+    source: str = "dictation",
+) -> dict:
+    return HISTORY.add(
+        original=original or text,
+        final=text,
+        duration=duration,
+        latency=latency,
+        engine=engine,
+        profile=profile,
+        audio=audio if SAVE_AUDIO else None,
+        sample_rate=SAMPLE_RATE,
+        source=source,
+    )
 
 
 def read_history() -> list:
-    """Parse history.txt into (timestamp, text) pairs, newest first."""
+    """Return (timestamp, text) pairs, including legacy history.txt."""
+    modern = [
+        (item.get("timestamp", "").replace("T", " "), item.get("final", ""))
+        for item in HISTORY.read()
+    ]
     path = os.path.join(BASE_DIR, HISTORY_FILE or "history.txt")
     entries = []
     try:
@@ -478,7 +572,7 @@ def read_history() -> list:
     except OSError:
         pass
     entries.reverse()
-    return entries
+    return modern + entries
 
 
 # ---------------------------------------------------------------- spectrum
@@ -509,7 +603,7 @@ def _update_spectrum(mono: np.ndarray) -> None:
 #
 # Responsiveness architecture: while you speak, Silero VAD slices your
 # speech into utterances at natural pauses, and a background worker
-# transcribes each utterance IMMEDIATELY — so when you stop, only the last
+# transcribes each utterance IMMEDIATELY â€” so when you stop, only the last
 # couple of seconds still need processing instead of the whole recording.
 
 vad_queue = queue.Queue()   # ("audio", block) | ("reset",) | ("flush", event)
@@ -587,7 +681,7 @@ def vad_worker() -> None:
 
 
 def transcriber_worker() -> None:
-    """Transcribes utterances the moment the VAD finishes them — while the
+    """Transcribes utterances the moment the VAD finishes them â€” while the
     recording is still going. In continuous mode the text is pasted
     immediately; otherwise pieces collect until the dictation ends."""
     while True:
@@ -604,12 +698,23 @@ def transcriber_worker() -> None:
         print("  piece (%.1fs audio, %.1fs work): %s"
               % (len(data) / SAMPLE_RATE, time.time() - t0, text))
         if continuous_mode:
-            piece = DICT.apply(clean_text(text))
+            profile = current_profile()
+            piece = finish_text(text, profile)
             if piece:
-                log_history(piece)
+                log_history(
+                    piece,
+                    original=text,
+                    audio=data,
+                    duration=len(data) / SAMPLE_RATE,
+                    latency=time.time() - t0,
+                    engine=getattr(ACTIVE_ENGINE, "name", ""),
+                    profile=profile,
+                    source="continuous",
+                )
                 inject(piece)
         else:
             partials.append(text)
+            ui_events.put(("partial", text))
 
 
 def split_audio(audio: np.ndarray, max_s: int = 14) -> list:
@@ -629,6 +734,46 @@ def split_audio(audio: np.ndarray, max_s: int = 14) -> list:
     return parts
 
 
+def transcribe_audio(audio: np.ndarray) -> str:
+    samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if len(samples) < SAMPLE_RATE * 0.25:
+        return ""
+    return " ".join(
+        filter(None, (ACTIVE_ENGINE.transcribe(part) for part in split_audio(samples)))
+    ).strip()
+
+
+def transcribe_wav_path(path: str, source: str = "file") -> dict | None:
+    audio = read_wav(path, SAMPLE_RATE)
+    started = time.time()
+    raw = transcribe_audio(audio)
+    profile = current_profile()
+    final = finish_text(raw, profile)
+    if not final:
+        return None
+    return log_history(
+        final,
+        original=raw,
+        audio=audio,
+        duration=len(audio) / SAMPLE_RATE,
+        latency=time.time() - started,
+        engine=getattr(ACTIVE_ENGINE, "name", ""),
+        profile=profile,
+        source=source,
+    )
+
+
+def available_microphones() -> list[tuple[int, str]]:
+    devices = []
+    try:
+        for index, info in enumerate(sd.query_devices()):
+            if int(info.get("max_input_channels", 0)) > 0:
+                devices.append((index, str(info.get("name", "Microphone"))))
+    except Exception:
+        pass
+    return devices
+
+
 def start_recording() -> None:
     global recording, chunks
     del partials[:]
@@ -640,11 +785,11 @@ def start_recording() -> None:
     recording = True
     ui_events.put("continuous" if continuous_mode else "recording")
     beep(start=True)
-    print("● Recording%s..." % (" (continuous)" if continuous_mode else ""))
+    print("â— Recording%s..." % (" (continuous)" if continuous_mode else ""))
 
 
 def stop_and_transcribe() -> None:
-    global recording
+    global recording, command_mode, command_selection
     recording = False
     ui_events.put("transcribing")
     beep(start=False)
@@ -674,14 +819,46 @@ def stop_and_transcribe() -> None:
                 filter(None, (ACTIVE_ENGINE.transcribe(p)
                               for p in split_audio(audio)))
             )
-        text = DICT.apply(clean_text(raw))
+        audio = np.concatenate(chunks).flatten() if chunks else np.zeros(0, dtype=np.float32)
+        profile = current_profile()
+        text = finish_text(raw, profile)
         if not text:
             print("Heard nothing intelligible.")
             return
-        print("→ (%.1fs wait) %s" % (time.time() - t0, text))
-        log_history(text)
+        latency = time.time() - t0
+        if command_mode:
+            transformed = transform_selected_text(command_selection, text)
+            if transformed is None:
+                print("Command not supported; selected text was left unchanged.")
+                ui_events.put(("notice", "Command not supported"))
+                return
+            log_history(
+                transformed,
+                original=text,
+                audio=audio,
+                duration=len(audio) / SAMPLE_RATE,
+                latency=latency,
+                engine=getattr(ACTIVE_ENGINE, "name", ""),
+                profile=profile,
+                source="command",
+            )
+            inject(transformed, trailing_space=False)
+            print("Command applied: %s" % text)
+            return
+        print("â†’ (%.1fs wait) %s" % (latency, text))
+        log_history(
+            text,
+            original=raw,
+            audio=audio,
+            duration=len(audio) / SAMPLE_RATE,
+            latency=latency,
+            engine=getattr(ACTIVE_ENGINE, "name", ""),
+            profile=profile,
+        )
         inject(text)
     finally:
+        command_mode = False
+        command_selection = ""
         ui_events.put("idle")
 
 
@@ -710,7 +887,7 @@ def end_continuous() -> None:
             while not seg_queue.empty() and time.time() < deadline:
                 time.sleep(0.1)
         ui_events.put("idle")
-        print("■ Continuous mode off.")
+        print("â–  Continuous mode off.")
 
 
 def toggle_continuous() -> None:
@@ -725,12 +902,57 @@ def toggle_continuous() -> None:
     if recording:
         # already dictating via Ctrl+Win: lock the mic open instead
         ui_events.put("continuous")
-        print("● Continuous mode on (mic locked open).")
+        print("â— Continuous mode on (mic locked open).")
     else:
         start_recording()
 
 
 # ---------------------------------------------------------------- hotkeys
+
+def capture_selected_text() -> str:
+    """Copy selected text without leaving Flow State's marker in the clipboard."""
+    marker = "__FLOW_STATE_SELECTION_%d__" % time.time_ns()
+    old = None
+    try:
+        old = pyperclip.paste()
+    except Exception:
+        pass
+    try:
+        pyperclip.copy(marker)
+        keyboard.send("ctrl+c")
+        deadline = time.time() + 0.8
+        while time.time() < deadline:
+            time.sleep(0.03)
+            copied = pyperclip.paste()
+            if copied != marker:
+                return copied.strip()
+        return ""
+    finally:
+        if old is not None:
+            try:
+                pyperclip.copy(old)
+            except Exception:
+                pass
+
+
+def toggle_command_mode() -> None:
+    """Capture a selected-text command with a press-once/press-again flow."""
+    global command_mode, command_selection
+    if command_mode and recording:
+        threading.Thread(target=_finish, daemon=True).start()
+        return
+    if recording:
+        return
+    selected = capture_selected_text()
+    if not selected:
+        ui_events.put(("notice", "Select text first"))
+        print("Command mode needs selected text.")
+        return
+    command_selection = selected
+    command_mode = True
+    start_recording()
+    ui_events.put(("notice", "Speak a command; press again to apply"))
+
 
 def on_key_down() -> None:
     global key_is_down, press_time
@@ -765,6 +987,7 @@ def register_hotkeys() -> None:
         for p in dict.fromkeys(parts):
             keyboard.on_release_key(p, lambda e: on_key_up())
     keyboard.add_hotkey(CONTINUOUS_HOTKEY, toggle_continuous)
+    keyboard.add_hotkey(COMMAND_HOTKEY, toggle_command_mode)
 
 
 # ---------------------------------------------------------------- tray icon
@@ -776,25 +999,18 @@ TRAY_ICONS = {}
 def start_tray() -> None:
     global TRAY, TRAY_ICONS
     import pystray
-    from PIL import Image, ImageDraw
+    from PIL import Image
 
-    def draw(color):
-        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        d = ImageDraw.Draw(img)
-        d.rounded_rectangle((24, 6, 40, 36), radius=8, fill=color)
-        d.arc((16, 18, 48, 46), 0, 180, fill=color, width=5)
-        d.line((32, 46, 32, 58), fill=color, width=5)
-        return img
-
+    base = Image.open(ICON_FILE).convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
     TRAY_ICONS = {
-        "idle": draw("#e8e2d4"),
-        "recording": draw("#c8371e"),
-        "continuous": draw("#c8371e"),
-        "transcribing": draw("#e8912a"),
+        "idle": base.copy(),
+        "recording": base.copy(),
+        "continuous": base.copy(),
+        "transcribing": base.copy(),
     }
 
     menu = pystray.Menu(
-        pystray.MenuItem("Hold or tap %s · %s = open mic"
+        pystray.MenuItem("Hold or tap %s Â· %s = open mic"
                          % (HOTKEY_LABEL, CONTINUOUS_LABEL),
                          None, enabled=False),
         pystray.Menu.SEPARATOR,
@@ -828,8 +1044,8 @@ TEAL = "#1f7f93"
 # ---------------------------------------------------------------- overlay
 
 class Overlay:
-    """The floating bar. A paper-white pill with six thin ink curves — one
-    per octave of your voice — drawn like a precision instrument chart.
+    """The floating bar. A paper-white pill with six thin ink curves â€” one
+    per octave of your voice â€” drawn like a precision instrument chart.
     Stays visible after use and fades away after IDLE_FADE seconds. Drag to
     move; snaps to screen anchors; never steals keyboard focus."""
 
@@ -865,7 +1081,7 @@ class Overlay:
         self.canvas.bind("<B1-Motion>", self._drag_move)
         self.canvas.bind("<ButtonRelease-1>", self._drag_end)
 
-        # static art, drawn ONCE — animation only moves coordinates
+        # static art, drawn ONCE â€” animation only moves coordinates
         def capsule(x0, y0, x1, y1, fill):
             cr = (y1 - y0) / 2
             self.canvas.create_oval(x0, y0, x0 + 2 * cr, y1, fill=fill, outline="")
@@ -881,19 +1097,22 @@ class Overlay:
         for gx in range(26, self.W - 10, 11):
             self.canvas.create_line(gx, 4, gx, self.H - 4, fill=HAIRLINE)
         self.canvas.create_line(20, mid, self.W - 7, mid, fill=HAIRLINE)
-        # microphone glyph (state indicator) — crisp vector art in place of the
+        # microphone glyph (state indicator) â€” crisp vector art in place of the
         # old status dot. Recolours by state; drawn once, never rebuilt.
         cx, _c = 11.0, self.DOTS["idle"]
+        # A compact badge leaves even breathing room inside the 26px pill.
+        self.canvas.create_oval(cx - 7, 6, cx + 7, 20,
+                                fill=PAPER_DIM, outline=HAIRLINE, width=1)
         self._mic = [                                      # (item, colour option)
-            (self.canvas.create_oval(cx - 2.4, 4, cx + 2.4, 13,
+            (self.canvas.create_oval(cx - 1.6, 8, cx + 1.6, 13.5,
                                      fill=_c, outline=""), "fill"),      # capsule
-            (self.canvas.create_arc(cx - 4.5, 6, cx + 4.5, 16,
+            (self.canvas.create_arc(cx - 3.2, 10, cx + 3.2, 16.5,
                                     start=180, extent=180, style=tk.ARC,
-                                    outline=_c, width=1.3), "outline"),  # cradle
-            (self.canvas.create_line(cx, 16, cx, 19.5,
-                                     fill=_c, width=1.3), "fill"),       # stem
-            (self.canvas.create_line(cx - 3, 20, cx + 3, 20,
-                                     fill=_c, width=1.3), "fill"),       # base
+                                    outline=_c, width=1.1), "outline"),  # cradle
+            (self.canvas.create_line(cx, 16.5, cx, 18,
+                                     fill=_c, width=1.1), "fill"),       # stem
+            (self.canvas.create_line(cx - 2.2, 18.2, cx + 2.2, 18.2,
+                                     fill=_c, width=1.1), "fill"),       # base
         ]
         # six octave curves + their little plotted-endpoint squares
         self.xs = list(range(21, self.W - 6, 4))
@@ -915,6 +1134,14 @@ class Overlay:
                 tx - 1, mid - 1, tx + 2, mid + 2,
                 fill=self.CURVE_COLORS[i], outline="",
             )
+        self.partial_bg = self.canvas.create_rectangle(
+            25, 4, self.W - 5, self.H - 4, fill=PAPER, outline="",
+            state="hidden",
+        )
+        self.partial_text = self.canvas.create_text(
+            31, mid, text="", anchor="w", width=self.W - 42,
+            fill="#6f685c", font=("Segoe UI", 8), state="hidden",
+        )
         # never steal focus from the window being dictated into
         self.root.update_idletasks()
         try:
@@ -1089,10 +1316,31 @@ class Overlay:
 
     # ---- event pump
 
+    def _show_partial(self, text: str, duration: int = 1800):
+        one_line = " ".join(text.split())
+        if len(one_line) > 42:
+            one_line = "..." + one_line[-39:]
+        self.canvas.itemconfigure(self.partial_text, text=one_line, state="normal")
+        self.canvas.itemconfigure(self.partial_bg, state="normal")
+        self.canvas.tag_raise(self.partial_bg)
+        self.canvas.tag_raise(self.partial_text)
+        self.root.after(duration, self._hide_partial)
+
+    def _hide_partial(self):
+        self.canvas.itemconfigure(self.partial_bg, state="hidden")
+        self.canvas.itemconfigure(self.partial_text, state="hidden")
+
     def _poll(self):
         try:
             while True:
                 state = ui_events.get_nowait()
+                if isinstance(state, tuple):
+                    kind, text = state
+                    if kind == "partial":
+                        self._show_partial(text)
+                    elif kind == "notice":
+                        self._show_partial(text, 2600)
+                    continue
                 if state == "quit":
                     if TRAY:
                         TRAY.stop()
@@ -1101,6 +1349,8 @@ class Overlay:
                 elif state == "hub":
                     self._open_hub()
                 elif state in self.DOTS:
+                    if state == "idle":
+                        self._hide_partial()
                     self._show(state)
                 else:  # "hide"
                     self.root.withdraw()
@@ -1112,285 +1362,18 @@ class Overlay:
 
     def _open_hub(self):
         if self.hub is None or not self.hub.top.winfo_exists():
-            self.hub = Hub(self.root)
+            self.hub = ModernHub(self.root, sys.modules[__name__])
         self.hub.show()
 
     def run(self):
         self.root.mainloop()
 
 
-# ---------------------------------------------------------------- hub
-
-class Hub:
-    """History, Dictionary & Options window. Ink on paper: search either
-    list, click a history entry to copy it, add/remove dictionary rules
-    inline, and tweak the app's behavior."""
-
-    def __init__(self, root):
-        self.top = tk.Toplevel(root)
-        self.top.title("Flow State — Hub")
-        self.top.geometry("580x570")
-        self.top.configure(bg=PAPER)
-        self.top.minsize(500, 420)
-        try:
-            self.top.iconbitmap(ICON_FILE)
-        except tk.TclError:
-            pass
-        self.tab = "history"
-        self.entries = []
-        self.rules = []
-
-        header = tk.Frame(self.top, bg=PAPER)
-        header.pack(fill="x", padx=18, pady=(14, 6))
-        tk.Label(header, text="Flow Hub", font=("Georgia", 17, "bold"),
-                 bg=PAPER, fg=INK).pack(side="left")
-        self.status = tk.Label(header, text="", font=("Segoe UI", 9),
-                               bg=PAPER, fg=VERMILION)
-        self.status.pack(side="right")
-
-        tabs = tk.Frame(self.top, bg=PAPER)
-        tabs.pack(fill="x", padx=18)
-        self.tab_btns = {}
-        for key, label in (("history", "History"),
-                           ("dictionary", "Dictionary"),
-                           ("options", "Options")):
-            b = tk.Label(tabs, text=label, font=("Segoe UI Semibold", 11),
-                         bg=PAPER, fg=INK, padx=2, pady=4, cursor="hand2")
-            b.pack(side="left", padx=(0, 18))
-            b.bind("<Button-1>", lambda e, k=key: self.switch(k))
-            self.tab_btns[key] = b
-        tk.Frame(self.top, bg=RIM, height=1).pack(fill="x", padx=18)
-
-        self.search_row = tk.Frame(self.top, bg=PAPER)
-        self.search_row.pack(fill="x", padx=18, pady=8)
-        self.query = tk.StringVar()
-        self.query.trace_add("write", lambda *a: self.refresh())
-        tk.Label(self.search_row, text="Search", font=("Segoe UI", 9),
-                 bg=PAPER, fg="#8a8272").pack(side="left", padx=(0, 8))
-        tk.Entry(self.search_row, textvariable=self.query, font=("Segoe UI", 10),
-                 bg=PAPER_DIM, fg=INK, relief="flat", insertbackground=INK,
-                 highlightthickness=1, highlightbackground=HAIRLINE,
-                 highlightcolor=VERMILION).pack(fill="x", expand=True, ipady=4)
-
-        self.body = tk.Frame(self.top, bg=PAPER)
-        self.body.pack(fill="both", expand=True, padx=18, pady=(0, 6))
-        self.listbox = tk.Listbox(
-            self.body, font=("Segoe UI", 10), bg=PAPER, fg=INK, relief="flat",
-            highlightthickness=1, highlightbackground=HAIRLINE,
-            selectbackground=PAPER_DIM, selectforeground=VERMILION,
-            activestyle="none",
-        )
-        sb = tk.Scrollbar(self.body, command=self.listbox.yview)
-        self.listbox.config(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self.listbox.pack(fill="both", expand=True)
-        self.listbox.bind("<<ListboxSelect>>", self.on_select)
-
-        # dictionary editor row
-        self.editor = tk.Frame(self.top, bg=PAPER)
-        self.say_var, self.type_var = tk.StringVar(), tk.StringVar()
-
-        def entry(parent, var, width):
-            return tk.Entry(parent, textvariable=var, width=width,
-                            font=("Segoe UI", 10), bg=PAPER_DIM, fg=INK,
-                            relief="flat", insertbackground=INK,
-                            highlightthickness=1, highlightbackground=HAIRLINE,
-                            highlightcolor=VERMILION)
-
-        entry(self.editor, self.say_var, 16).pack(side="left", ipady=4)
-        tk.Label(self.editor, text="→", bg=PAPER, fg=INK,
-                 font=("Segoe UI", 11)).pack(side="left", padx=6)
-        entry(self.editor, self.type_var, 22).pack(side="left", ipady=4)
-
-        def button(parent, text, cmd):
-            b = tk.Label(parent, text=text, font=("Segoe UI Semibold", 10),
-                         bg=INK, fg=PAPER, padx=12, pady=4, cursor="hand2")
-            b.bind("<Button-1>", lambda e: cmd())
-            return b
-
-        button(self.editor, "Add rule", self.add_rule).pack(side="left",
-                                                            padx=(10, 6))
-        button(self.editor, "Delete selected", self.delete_rule).pack(side="left")
-
-        # ---- options tab
-        self.options = tk.Frame(self.top, bg=PAPER)
-        self.autostart_var = tk.BooleanVar(value=get_autostart())
-        self.verbatim_var = tk.BooleanVar(value=bool(VERBATIM))
-        self.inject_var = tk.StringVar(value=INJECTION)
-        self.engine_var = tk.StringVar(value=ENGINE)
-        self.autostop_var = tk.StringVar(value=str(AUTO_STOP))
-        self.fade_var = tk.StringVar(value=str(IDLE_FADE))
-        self.maxrec_var = tk.StringVar(value=str(MAX_RECORD))
-        self.hotkey_var = tk.StringVar(value=HOTKEY)
-
-        def row(label):
-            f = tk.Frame(self.options, bg=PAPER)
-            f.pack(fill="x", pady=3)
-            tk.Label(f, text=label, font=("Segoe UI", 10), bg=PAPER, fg=INK,
-                     width=26, anchor="w").pack(side="left")
-            return f
-
-        def check(parent, var, text=""):
-            tk.Checkbutton(parent, text=text, variable=var, bg=PAPER, fg=INK,
-                           font=("Segoe UI", 10), activebackground=PAPER,
-                           selectcolor=PAPER_DIM,
-                           highlightthickness=0).pack(side="left")
-
-        def radios(parent, var, values):
-            for val, label in values:
-                tk.Radiobutton(parent, text=label, value=val, variable=var,
-                               bg=PAPER, fg=INK, font=("Segoe UI", 10),
-                               activebackground=PAPER, selectcolor=PAPER_DIM,
-                               highlightthickness=0).pack(side="left",
-                                                          padx=(0, 10))
-
-        check(row("Start with Windows"), self.autostart_var)
-        check(row("Verbatim (no cleanup)"), self.verbatim_var)
-        radios(row("Insert text by"), self.inject_var,
-               [("paste", "pasting (fast)"), ("type", "typing (compatible)")])
-        f = row("Auto-stop after silence (s)")
-        entry(f, self.autostop_var, 6).pack(side="left", ipady=2)
-        tk.Label(f, text="0 = off", font=("Segoe UI", 9), bg=PAPER,
-                 fg="#8a8272").pack(side="left", padx=8)
-        entry(row("Pill fades after idle (s)"), self.fade_var, 6).pack(
-            side="left", ipady=2)
-        entry(row("Max recording (s)"), self.maxrec_var, 6).pack(
-            side="left", ipady=2)
-        radios(row("Engine  (restart to apply)"), self.engine_var,
-               [("moonshine", "Moonshine (EN, fast)"),
-                ("whisper", "Whisper (any language)")])
-        entry(row("Hotkey  (restart to apply)"), self.hotkey_var, 18).pack(
-            side="left", ipady=2)
-        foot = tk.Frame(self.options, bg=PAPER)
-        foot.pack(fill="x", pady=(12, 0))
-        button(foot, "Save options", self.save_options).pack(side="left")
-        tk.Label(self.options,
-                 text="Continuous mode: %s. Everything except Engine and "
-                      "Hotkey applies immediately." % CONTINUOUS_LABEL,
-                 font=("Segoe UI", 9), bg=PAPER, fg="#8a8272",
-                 anchor="w", justify="left", wraplength=480).pack(
-            fill="x", pady=(10, 0))
-
-        self.hint = tk.Label(self.top, text="", font=("Segoe UI", 9),
-                             bg=PAPER, fg="#8a8272", anchor="w")
-        self.hint.pack(fill="x", padx=18, pady=(0, 10))
-        self.switch("history")
-
-    def show(self):
-        self.refresh()
-        self.top.deiconify()
-        self.top.lift()
-
-    def switch(self, tab):
-        self.tab = tab
-        for key, b in self.tab_btns.items():
-            b.config(fg=VERMILION if key == tab else INK)
-        self.editor.pack_forget()
-        self.options.pack_forget()
-        if tab == "options":
-            self.search_row.pack_forget()
-            self.body.pack_forget()
-            self.options.pack(fill="both", expand=True, padx=18, pady=10,
-                              before=self.hint)
-            self.hint.config(text="")
-            return
-        self.search_row.pack(fill="x", padx=18, pady=8, before=self.hint)
-        self.body.pack(fill="both", expand=True, padx=18, pady=(0, 6),
-                       before=self.hint)
-        if tab == "dictionary":
-            self.editor.pack(fill="x", padx=18, pady=(0, 4), before=self.hint)
-            self.hint.config(text="Select a rule to delete it, or type a new "
-                                  "one and press Add rule.")
-        else:
-            self.hint.config(text="Click an entry to copy it to the clipboard.")
-        self.refresh()
-
-    def save_options(self):
-        try:
-            autostop = max(0.0, float(self.autostop_var.get()))
-            fade = max(5, int(float(self.fade_var.get())))
-            maxrec = max(5, int(float(self.maxrec_var.get())))
-        except ValueError:
-            self.flash("Numbers only in the seconds boxes")
-            return
-        hot = self.hotkey_var.get().strip().lower() or "ctrl+windows"
-        save_settings({
-            "VERBATIM": bool(self.verbatim_var.get()),
-            "INJECTION": self.inject_var.get(),
-            "AUTO_STOP": autostop,
-            "IDLE_FADE": fade,
-            "MAX_RECORD": maxrec,
-            "ENGINE": self.engine_var.get(),
-            "HOTKEY": hot,
-        })
-        try:
-            set_autostart(bool(self.autostart_var.get()))
-        except OSError:
-            self.flash("Saved, but couldn't change autostart")
-            return
-        self.flash("Saved (engine & hotkey changes apply after restart)")
-
-    def refresh(self):
-        q = self.query.get().lower()
-        self.listbox.delete(0, "end")
-        if self.tab == "history":
-            self.entries = [e for e in read_history()
-                            if q in e[1].lower() or q in e[0]]
-            for ts, text in self.entries:
-                one = " ".join(text.split())
-                if len(one) > 70:
-                    one = one[:69] + "…"
-                self.listbox.insert("end", " %s   %s" % (ts[5:16], one))
-        else:
-            self.rules = [r for r in read_rules(DICT.path)
-                          if q in r[0].lower() or q in r[1].lower()]
-            for spoken, typed in self.rules:
-                self.listbox.insert("end", " %s  →  %s" % (spoken, typed))
-
-    def on_select(self, _e):
-        if self.tab != "history":
-            return
-        sel = self.listbox.curselection()
-        if not sel:
-            return
-        pyperclip.copy(self.entries[sel[0]][1])
-        self.flash("Copied to clipboard")
-
-    def add_rule(self):
-        spoken = self.say_var.get().strip()
-        typed = self.type_var.get().strip()
-        if not spoken or not typed:
-            self.flash("Fill in both boxes first")
-            return
-        rules = [r for r in read_rules(DICT.path) if r[0].lower() != spoken.lower()]
-        rules.append((spoken, typed))
-        write_rules(DICT.path, rules)
-        self.say_var.set("")
-        self.type_var.set("")
-        self.refresh()
-        self.flash("Rule saved")
-
-    def delete_rule(self):
-        sel = self.listbox.curselection()
-        if self.tab != "dictionary" or not sel:
-            self.flash("Select a rule first")
-            return
-        victim = self.rules[sel[0]]
-        rules = [r for r in read_rules(DICT.path) if r != victim]
-        write_rules(DICT.path, rules)
-        self.refresh()
-        self.flash("Rule deleted")
-
-    def flash(self, msg):
-        self.status.config(text=msg)
-        self.top.after(1800, lambda: self.status.config(text=""))
-
-
 # ---------------------------------------------------------------- main
 
 def main() -> None:
     global vad_enabled, ACTIVE_ENGINE
-    # Status prints use "●"/"→". Under a redirected/piped stdout Windows
+    # Status prints use "â—"/"â†’". Under a redirected/piped stdout Windows
     # picks cp1252 (strict), so those chars raise UnicodeEncodeError and silently
     # kill the recording/finish worker threads. Force UTF-8 with replacement so a
     # print can never take a thread (and the dictation) down.
@@ -1399,9 +1382,9 @@ def main() -> None:
             _s.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    want_hub = "--hub" in sys.argv
+    want_hub = "--hub" in sys.argv or OPEN_HUB
     if not ipc_server():
-        # another copy is already running — ask it to show its Hub instead
+        # another copy is already running â€” ask it to show its Hub instead
         ipc_send("hub")
         print("Already running; opened the Hub in the existing instance.")
         return
@@ -1411,17 +1394,21 @@ def main() -> None:
         pass
     make_cues()
     make_icon()
+    if HISTORY_DAYS:
+        removed = HISTORY.prune(int(HISTORY_DAYS))
+        if removed:
+            print("History retention removed %d old dictation(s)." % removed)
     print("Loading speech model (first run may download it)...")
     ACTIVE_ENGINE = load_engine()
     print("Engine: %s" % ACTIVE_ENGINE.name)
-    # first inference pays a ~8s one-time warm-up cost — pay it now, at
+    # first inference pays a ~8s one-time warm-up cost â€” pay it now, at
     # startup, instead of on the user's first dictation
     ACTIVE_ENGINE.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))
     print("Engine warmed up.")
 
     stream = sd.InputStream(
         samplerate=SAMPLE_RATE, blocksize=BLOCK, channels=1,
-        dtype="float32", callback=audio_callback,
+        dtype="float32", callback=audio_callback, device=MICROPHONE,
     )
     stream.start()
 

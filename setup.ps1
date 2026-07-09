@@ -40,4 +40,25 @@ if (-not (Test-Path $vad)) {
 
 Write-Host ""
 Write-Host "Done. Start it with:  .\run.bat" -ForegroundColor Green
+
+$desktop = [Environment]::GetFolderPath("Desktop")
+$shortcutPath = Join-Path $desktop "Flow State.lnk"
+$pythonw = Join-Path $PSScriptRoot ".venv\Scripts\pythonw.exe"
+$flowPy = Join-Path $PSScriptRoot "flow.py"
+$icon = Join-Path $PSScriptRoot "models\flow.ico"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $pythonw
+    $shortcut.Arguments = "`"$flowPy`" --hub"
+    $shortcut.WorkingDirectory = $PSScriptRoot
+    if (Test-Path $icon) {
+        $shortcut.IconLocation = "$icon,0"
+    }
+    $shortcut.Save()
+    Write-Host "Desktop shortcut updated: $shortcutPath" -ForegroundColor Green
+} catch {
+    Write-Host "Shortcut setup skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 Write-Host "(Sound cues and the desktop icon are generated on first launch.)" -ForegroundColor DarkGray

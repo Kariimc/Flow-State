@@ -1,0 +1,4 @@
+# Recognition vocabulary, one exact word or phrase per line.
+#
+# Add names, acronyms, product names, and technical terms here or through
+# Flow State Hub > Dictionary. Replacements and snippets stay in dictionary.txt.

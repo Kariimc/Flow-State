@@ -10,8 +10,10 @@ __pycache__/
 
 # Personal & generated runtime data — never commit
 history.txt
+history.jsonl
 settings.json
 overlay_pos.txt
+data/
 
 # Models: downloaded or generated at runtime (see setup.ps1 / README)
 models/*
