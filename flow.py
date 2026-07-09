@@ -412,12 +412,25 @@ def ipc_send(msg: str) -> bool:
 
 
 ICON_FILE = os.path.join(BASE_DIR, "models", "flow.ico")
+TRAY_ICON_FILE = os.path.join(BASE_DIR, "models", "flow-tray.ico")
+
+
+def _icon_font(size: int):
+    from PIL import ImageFont
+
+    for path in (
+        r"C:\Windows\Fonts\georgiab.ttf",
+        r"C:\Windows\Fonts\georgia.ttf",
+    ):
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
 
 
 def make_icon() -> None:
-    """Draw the app icon: the pill's waveform on paper, as a desktop icon."""
-    if os.path.exists(ICON_FILE):
-        return
+    """Draw the desktop and tray icons."""
     from PIL import Image, ImageDraw
 
     img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
@@ -427,6 +440,8 @@ def make_icon() -> None:
     for gx in range(52, 246, 27):
         d.line((gx, 44, gx, 212), fill="#e3dccb", width=3)
     d.line((32, 128, 224, 128), fill="#e3dccb", width=3)
+    font = _icon_font(92)
+    d.text((36, 30), "F", fill="#c8371e", font=font)
     for color, cycles, amp, width, phase in (
         ("#1f7f93", 3.0, 32, 11, 1.2),
         ("#e8912a", 2.0, 50, 13, 2.6),
@@ -440,10 +455,24 @@ def make_icon() -> None:
         d.line(pts, fill=color, width=width, joint="curve")
         ex, ey = pts[-1]
         d.rectangle((ex - 8, ey - 8, ex + 8, ey + 8), fill=color)
-    d.ellipse((40, 40, 68, 68), fill="#c8371e")
     try:
         img.save(ICON_FILE, sizes=[(256, 256), (64, 64), (48, 48),
                                    (32, 32), (16, 16)])
+    except OSError:
+        pass
+
+    tray = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tray)
+    mic = "#8f8a80"
+    td.rounded_rectangle((92, 22, 164, 142), radius=34, fill=mic)
+    td.arc((54, 82, 202, 190), 0, 180, fill=mic, width=22)
+    td.line((128, 190, 128, 222), fill=mic, width=22)
+    td.line((78, 222, 178, 222), fill=mic, width=22)
+    small_font = _icon_font(58)
+    td.text((111, 58), "F", fill="#c8371e", font=small_font)
+    try:
+        tray.save(TRAY_ICON_FILE, sizes=[(256, 256), (64, 64), (48, 48),
+                                         (32, 32), (16, 16)])
     except OSError:
         pass
 
@@ -1001,7 +1030,7 @@ def start_tray() -> None:
     import pystray
     from PIL import Image
 
-    base = Image.open(ICON_FILE).convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
+    base = Image.open(TRAY_ICON_FILE).convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
     TRAY_ICONS = {
         "idle": base.copy(),
         "recording": base.copy(),
