@@ -431,45 +431,99 @@ def _icon_font(size: int):
 
 def make_icon() -> None:
     """Draw the desktop and tray icons."""
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFilter
 
-    img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle((10, 10, 246, 246), radius=58, fill="#f8f5ee",
-                        outline="#26231d", width=9)
-    for gx in range(52, 246, 27):
-        d.line((gx, 44, gx, 212), fill="#e3dccb", width=3)
-    d.line((32, 128, 224, 128), fill="#e3dccb", width=3)
-    font = _icon_font(92)
-    d.text((36, 30), "F", fill="#c8371e", font=font)
+    scale = 4
+    size = 256
+
+    def downsample(image):
+        return image.resize((size, size), Image.Resampling.LANCZOS)
+
+    def rounded_mask(box_size, radius):
+        mask = Image.new("L", box_size, 0)
+        md = ImageDraw.Draw(mask)
+        md.rounded_rectangle((0, 0, box_size[0] - 1, box_size[1] - 1),
+                             radius=radius, fill=255)
+        return mask
+
+    big = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(big)
+    box = tuple(v * scale for v in (12, 12, 244, 244))
+    shadow = Image.new("RGBA", big.size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle(box, radius=54 * scale, fill=(28, 25, 20, 90))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(5 * scale))
+    big.alpha_composite(shadow, (0, 5 * scale))
+    bd.rounded_rectangle(box, radius=54 * scale, fill="#f8f5ee",
+                         outline="#26231d", width=8 * scale)
+    for gx in range(48, 230, 26):
+        width = 4 if gx % 52 == 0 else 2
+        bd.line((gx * scale, 42 * scale, gx * scale, 214 * scale),
+                fill="#ded6c6", width=width * scale)
+    for gy in range(58, 208, 26):
+        bd.line((34 * scale, gy * scale, 222 * scale, gy * scale),
+                fill="#eee5d6", width=1 * scale)
+    bd.line((30 * scale, 128 * scale, 226 * scale, 128 * scale),
+            fill="#d3cabb", width=3 * scale)
     for color, cycles, amp, width, phase in (
-        ("#1f7f93", 3.0, 32, 11, 1.2),
-        ("#e8912a", 2.0, 50, 13, 2.6),
-        ("#c8371e", 1.2, 68, 15, 0.0),
+        ("#1f7f93", 3.0, 26, 8, 1.2),
+        ("#e8912a", 2.0, 40, 10, 2.6),
+        ("#c8371e", 1.2, 54, 12, 0.0),
     ):
         pts = []
         for i in range(0, 101, 2):
-            x = 32 + (224 - 32) * i / 100
-            y = 128 + amp * math.sin(2 * math.pi * cycles * i / 100 + phase)
-            pts.append((x, y))
-        d.line(pts, fill=color, width=width, joint="curve")
-        ex, ey = pts[-1]
-        d.rectangle((ex - 8, ey - 8, ex + 8, ey + 8), fill=color)
+            x = 34 + (224 - 34) * i / 100
+            y = 132 + amp * math.sin(2 * math.pi * cycles * i / 100 + phase)
+            pts.append((x * scale, y * scale))
+        bd.line(pts, fill=color, width=width * scale, joint="curve")
+    font = _icon_font(116 * scale)
+    bd.text((29 * scale, 18 * scale), "F", fill=(38, 35, 29, 80), font=font)
+    bd.text((25 * scale, 14 * scale), "F", fill="#c8371e", font=font)
+    img = downsample(big)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((12, 12, 244, 244), radius=54, outline="#fdfbf6", width=2)
     try:
         img.save(ICON_FILE, sizes=[(256, 256), (64, 64), (48, 48),
                                    (32, 32), (16, 16)])
     except OSError:
         pass
 
-    tray = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-    td = ImageDraw.Draw(tray)
+    tray_big = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tray_big)
     mic = "#8f8a80"
-    td.rounded_rectangle((92, 22, 164, 142), radius=34, fill=mic)
-    td.arc((54, 82, 202, 190), 0, 180, fill=mic, width=22)
-    td.line((128, 190, 128, 222), fill=mic, width=22)
-    td.line((78, 222, 178, 222), fill=mic, width=22)
-    small_font = _icon_font(58)
-    td.text((111, 58), "F", fill="#c8371e", font=small_font)
+    dark = "#6f695e"
+    light = "#b9b3a8"
+    mic_shadow = Image.new("RGBA", tray_big.size, (0, 0, 0, 0))
+    msd = ImageDraw.Draw(mic_shadow)
+    msd.rounded_rectangle(tuple(v * scale for v in (84, 20, 172, 152)),
+                          radius=42 * scale, fill=(0, 0, 0, 90))
+    msd.arc(tuple(v * scale for v in (47, 83, 209, 195)), 0, 180,
+            fill=(0, 0, 0, 90), width=23 * scale)
+    msd.line(tuple(v * scale for v in (128, 193, 128, 226)),
+             fill=(0, 0, 0, 90), width=23 * scale)
+    msd.line(tuple(v * scale for v in (78, 226, 178, 226)),
+             fill=(0, 0, 0, 90), width=23 * scale)
+    mic_shadow = mic_shadow.filter(ImageFilter.GaussianBlur(3 * scale))
+    tray_big.alpha_composite(mic_shadow, (0, 4 * scale))
+    td.rounded_rectangle(tuple(v * scale for v in (84, 20, 172, 152)),
+                         radius=42 * scale, fill=mic)
+    td.line(tuple(v * scale for v in (108, 31, 108, 139)),
+            fill=light, width=5 * scale)
+    td.line(tuple(v * scale for v in (164, 43, 164, 132)),
+            fill=dark, width=5 * scale)
+    td.arc(tuple(v * scale for v in (47, 83, 209, 195)), 0, 180,
+           fill=mic, width=23 * scale)
+    td.arc(tuple(v * scale for v in (54, 91, 202, 187)), 0, 180,
+           fill=light, width=5 * scale)
+    td.line(tuple(v * scale for v in (128, 193, 128, 226)),
+            fill=mic, width=23 * scale)
+    td.line(tuple(v * scale for v in (78, 226, 178, 226)),
+            fill=mic, width=23 * scale)
+    small_font = _icon_font(70 * scale)
+    td.text((109 * scale, 49 * scale), "F", fill=(38, 35, 29, 80),
+            font=small_font)
+    td.text((105 * scale, 45 * scale), "F", fill="#c8371e", font=small_font)
+    tray = downsample(tray_big)
     try:
         tray.save(TRAY_ICON_FILE, sizes=[(256, 256), (64, 64), (48, 48),
                                          (32, 32), (16, 16)])
