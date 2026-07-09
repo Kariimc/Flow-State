@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-09
-**Last verified:** real repo compile passed; `C:\Users\Kariim\flow-state\.venv\Scripts\python.exe -m unittest -v test_flow_features.py` ran 13 tests OK; Tk Hub smoke captured 9 light pages and 2 dark pages; Desktop shortcut target/icon verified.
+**Last verified:** real repo compile passed; `C:\Users\Kariim\flow-state\.venv\Scripts\python.exe -m unittest -v test_flow_features.py` ran 13 tests OK; Tk Hub smoke captured 9 light pages and 2 dark pages; Desktop shortcut target/icon verified; icon generator compile passed and regenerated `models\flow.ico` + `models\flow-tray.ico`; overlay mic badge compile passed.
 
 ## Where We Are
 
@@ -51,3 +51,5 @@ this back to Whisper clone; Flow State / Flow-State is the current name.
   toggle bands or white knobs.
 - 2026-07-09 - Used the same `models\flow.ico` for Desktop and tray so the
   app identity is consistent after the repo rename to Flow-State.
+- 2026-07-09 - Superseded the first tray-icon parity pass with distinct polished icons: Desktop uses `models\flow.ico` with the red F in front of the waveform/graph paper, while the tray uses `models\flow-tray.ico`, a shaded grey mic with the red F centered in the mic head.
+- 2026-07-09 - Centered the floating waveform bar's mic badge around the 26px pill midpoint (`mid = 13`), with a 12.8px circle and smaller mic glyph so it no longer hangs high or low inside the bar.
