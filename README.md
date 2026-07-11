@@ -91,6 +91,19 @@ capture is available when Windows exposes a Stereo Mix input device.
   the Hub.
 - **First word missing** - increase `PRE_ROLL`.
 
+## Performance Check
+
+Run the repeatable local benchmark after changing startup, text cleanup,
+history, or the overlay:
+
+```powershell
+.venv\Scripts\python.exe benchmark_flow.py
+```
+
+Add `--engine` to include loading and warming the configured speech model. The
+report uses median and p95 timings so one unusually cold run stays visible
+without distorting the typical result.
+
 ## Reinstall From Scratch
 
 Delete `.venv` and `models/`, then run `setup.ps1` again. For contributor
