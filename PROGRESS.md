@@ -30,9 +30,9 @@ raw samples were old 10048.0/4232.6/4413.4 ms and new
 
 ## Do Next
 
-Measure stop-to-insert median/p95 in a live Notepad run and add the repeatable
-benchmark command to the repo. Finish the current competitor/community audit,
-then rank and specify the ten differentiators before building them.
+Measure stop-to-insert median/p95 in a live Notepad run. Finish the current
+competitor/community audit, then rank and specify the ten differentiators
+before building them.
 
 ## Don't Forget
 
@@ -54,6 +54,9 @@ then rank and specify the ten differentiators before building them.
   files. The current cache target is locked, so compile to a separate path.
 - Tk tests must run outside the desktop sandbox; inside it Tcl reports a false
   `init.tcl` failure. A real desktop check reports Tcl/Tk 8.6.12.
+- `benchmark_flow.py` is the repeatable baseline command. Its 2026-07-11 quick
+  run: import median 604.8 ms/p95 790.4 ms, text finish median 0.2 ms/p95
+  0.6 ms, text history median 2.3 ms, 10-second audio history median 3.8 ms.
 
 ## Why It's Built This Way
 
