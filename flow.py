@@ -635,6 +635,17 @@ def log_history(
     )
 
 
+def deliver_text(text: str, *, trailing_space: bool = True, **history) -> dict | None:
+    """Insert completed text before slower, non-critical history persistence."""
+    inject(text, trailing_space=trailing_space)
+    try:
+        return log_history(text, **history)
+    except (OSError, ValueError) as exc:
+        print("History save failed: %s" % exc)
+        ui_events.put(("notice", "Text inserted; history save failed"))
+        return None
+
+
 def read_history() -> list:
     """Return (timestamp, text) pairs, including legacy history.txt."""
     modern = [
@@ -784,7 +795,7 @@ def transcriber_worker() -> None:
             profile = current_profile()
             piece = finish_text(text, profile)
             if piece:
-                log_history(
+                deliver_text(
                     piece,
                     original=text,
                     audio=data,
@@ -794,7 +805,6 @@ def transcriber_worker() -> None:
                     profile=profile,
                     source="continuous",
                 )
-                inject(piece)
         else:
             partials.append(text)
             ui_events.put(("partial", text))
@@ -915,8 +925,9 @@ def stop_and_transcribe() -> None:
                 print("Command not supported; selected text was left unchanged.")
                 ui_events.put(("notice", "Command not supported"))
                 return
-            log_history(
+            deliver_text(
                 transformed,
+                trailing_space=False,
                 original=text,
                 audio=audio,
                 duration=len(audio) / SAMPLE_RATE,
@@ -925,11 +936,10 @@ def stop_and_transcribe() -> None:
                 profile=profile,
                 source="command",
             )
-            inject(transformed, trailing_space=False)
             print("Command applied: %s" % text)
             return
         print("â†’ (%.1fs wait) %s" % (latency, text))
-        log_history(
+        deliver_text(
             text,
             original=raw,
             audio=audio,
@@ -938,7 +948,6 @@ def stop_and_transcribe() -> None:
             engine=getattr(ACTIVE_ENGINE, "name", ""),
             profile=profile,
         )
-        inject(text)
     finally:
         command_mode = False
         command_selection = ""

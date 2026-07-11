@@ -1,7 +1,7 @@
 # Flow State - Progress
 
-**Updated:** 2026-07-09
-**Last verified:** real repo compile passed; `C:\Users\Kariim\flow-state\.venv\Scripts\python.exe -m unittest -v test_flow_features.py` ran 13 tests OK; Tk Hub smoke captured 9 light pages and 2 dark pages; Desktop shortcut target/icon verified; icon generator compile passed and regenerated `models\flow.ico` + `models\flow-tray.ico`; overlay mic badge compile passed.
+**Updated:** 2026-07-11
+**Last verified:** full unit discovery ran 14 tests OK, including transcript delivery under history-write failure; five Python files compiled to an isolated cache; import baseline 2314.4 ms, engine load 4303.5 ms, warmed 0.5-second silent inference 29.1-52.6 ms; `git diff --check` passed.
 
 ## Where We Are
 
@@ -19,11 +19,16 @@ Dictionary, General, Dictation, Audio & mic, Appearance, Privacy, Files &
 meetings, and Statistics. Header/title clipping was fixed by reducing the
 Georgia header sizes and increasing header height.
 
+Performance work is active on branch `perf/reliability-baseline`. The first
+slice inserts completed text before saving WAV/history data, so disk latency or
+an ordinary history-write error cannot prevent the transcript from appearing.
+The old implementation failed the new regression test; the fixed path passes.
+
 ## Do Next
 
-Run a live dictated sentence into Notepad after restarting Flow State, then
-decide whether to scope the optional local-LLM deep-clean pass. Do not rename
-this back to Whisper clone; Flow State / Flow-State is the current name.
+Build the repeatable benchmark harness and Hub control-action matrix, then
+measure key-to-overlay and stop-to-insert median/p95 in a live Notepad run.
+Use refreshed competitor/community evidence to rank the ten differentiators.
 
 ## Don't Forget
 
@@ -39,6 +44,10 @@ this back to Whisper clone; Flow State / Flow-State is the current name.
   separation is not built.
 - Tests include a bite-proof guard that history deletion never unlinks audio
   outside Flow State's owned `data\recordings` directory.
+- Do not claim Flow State is faster than competitors or that a feature is
+  exclusive until a matching benchmark or current competitor audit proves it.
+- Run unittest and `py_compile` sequentially because parallel runs race on pyc
+  files. The current cache target is locked, so compile to a separate path.
 
 ## Why It's Built This Way
 
@@ -53,3 +62,4 @@ this back to Whisper clone; Flow State / Flow-State is the current name.
   app identity is consistent after the repo rename to Flow-State.
 - 2026-07-09 - Superseded the first tray-icon parity pass with distinct polished icons: Desktop uses `models\flow.ico` with the red F in front of the waveform/graph paper, while the tray uses `models\flow-tray.ico`, a shaded grey mic with the red F centered in the mic head.
 - 2026-07-09 - Centered the floating waveform bar's mic badge around the 26px pill midpoint (`mid = 13`), with a 12.8px circle and smaller mic glyph so it no longer hangs high or low inside the bar.
+- 2026-07-11 - Made transcript insertion precede non-critical history persistence because user-visible delivery must survive storage errors and should not wait for WAV/fsync work.
