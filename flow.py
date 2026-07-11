@@ -28,7 +28,6 @@ from tkinter import filedialog, messagebox
 import keyboard
 import numpy as np
 import pyperclip
-import sounddevice as sd
 
 from flow_features import (
     PROFILE_PRESETS,
@@ -170,6 +169,23 @@ key_is_down = False
 press_time = 0.0
 busy = threading.Lock()
 ACTIVE_ENGINE = None
+sd = None
+_audio_load_error = None
+
+
+def load_audio_backend():
+    """Load PortAudio only when startup actually needs microphone access."""
+    global sd, _audio_load_error
+    if sd is not None:
+        return sd
+    try:
+        import sounddevice as backend
+    except Exception as exc:
+        _audio_load_error = exc
+        return None
+    sd = backend
+    _audio_load_error = None
+    return sd
 
 
 # ---------------------------------------------------------------- engines
@@ -859,7 +875,10 @@ def transcribe_wav_path(path: str, source: str = "file") -> dict | None:
 def available_microphones() -> list[tuple[int, str]]:
     devices = []
     try:
-        for index, info in enumerate(sd.query_devices()):
+        backend = load_audio_backend()
+        if backend is None:
+            return devices
+        for index, info in enumerate(backend.query_devices()):
             if int(info.get("max_input_channels", 0)) > 0:
                 devices.append((index, str(info.get("name", "Microphone"))))
     except Exception:
@@ -1142,6 +1161,7 @@ class Overlay:
     move; snaps to screen anchors; never steals keyboard focus."""
 
     W, H = 190, 26
+    POLL_MS = 20
     CURVE_COLORS = ["#c8371e", "#e8912a", "#1f7f93",
                     "#d9a53f", "#a32c14", "#4d9fb0"]
     CURVE_WIDTHS = [1.7, 1.3, 1.3, 1.1, 1.0, 1.0]
@@ -1247,7 +1267,7 @@ class Overlay:
         except Exception:
             pass
         self._place()
-        self.root.after(100, self._poll)
+        self.root.after(self.POLL_MS, self._poll)
         self.root.after(30, self._animate)
 
     # ---- position, drag & snap
@@ -1450,7 +1470,7 @@ class Overlay:
                     set_tray_state("idle")
         except queue.Empty:
             pass
-        self.root.after(100, self._poll)
+        self.root.after(self.POLL_MS, self._poll)
 
     def _open_hub(self):
         if self.hub is None or not self.hub.top.winfo_exists():
@@ -1491,12 +1511,18 @@ def main() -> None:
         if removed:
             print("History retention removed %d old dictation(s)." % removed)
     print("Loading speech model (first run may download it)...")
+    audio_loader = threading.Thread(target=load_audio_backend, daemon=True)
+    audio_loader.start()
     ACTIVE_ENGINE = load_engine()
     print("Engine: %s" % ACTIVE_ENGINE.name)
     # first inference pays a ~8s one-time warm-up cost â€” pay it now, at
     # startup, instead of on the user's first dictation
     ACTIVE_ENGINE.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))
     print("Engine warmed up.")
+
+    audio_loader.join()
+    if sd is None:
+        raise RuntimeError("Audio backend failed to load") from _audio_load_error
 
     stream = sd.InputStream(
         samplerate=SAMPLE_RATE, blocksize=BLOCK, channels=1,

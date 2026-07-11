@@ -1,3 +1,4 @@
+import sys
 import unittest
 from unittest import mock
 
@@ -5,6 +6,12 @@ import flow
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_import_does_not_eagerly_load_audio_backend(self):
+        self.assertNotIn("sounddevice", sys.modules)
+
+    def test_overlay_event_poll_ceiling_is_25ms(self):
+        self.assertLessEqual(flow.Overlay.POLL_MS, 25)
+
     def test_delivery_precedes_history_and_survives_history_failure(self):
         calls = []
 

@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-11
-**Last verified:** full unit discovery ran 14 tests OK, including transcript delivery under history-write failure; five Python files compiled to an isolated cache; import baseline 2314.4 ms, engine load 4303.5 ms, warmed 0.5-second silent inference 29.1-52.6 ms; `git diff --check` passed.
+**Last verified:** full desktop-context discovery ran 17 tests OK in 15.657s, including all 9 Hub pages and 11 page-specific command buttons; 6 Python files compiled to an isolated cache; startup import+engine-warm median improved from 4413.4 ms to 3416.2 ms across 3+3 clean processes (22.6%); overlay event ceiling is now 20 ms; `git diff --check` passed.
 
 ## Where We Are
 
@@ -23,12 +23,16 @@ Performance work is active on branch `perf/reliability-baseline`. The first
 slice inserts completed text before saving WAV/history data, so disk latency or
 an ordinary history-write error cannot prevent the transcript from appearing.
 The old implementation failed the new regression test; the fixed path passes.
+The overlay now checks cross-thread state every 20 ms instead of 100 ms, and
+audio initialization is lazy and overlaps model loading. The startup benchmark
+raw samples were old 10048.0/4232.6/4413.4 ms and new
+3476.3/3416.2/3046.1 ms; medians are used because the first old run was cold.
 
 ## Do Next
 
-Build the repeatable benchmark harness and Hub control-action matrix, then
-measure key-to-overlay and stop-to-insert median/p95 in a live Notepad run.
-Use refreshed competitor/community evidence to rank the ten differentiators.
+Measure stop-to-insert median/p95 in a live Notepad run and add the repeatable
+benchmark command to the repo. Finish the current competitor/community audit,
+then rank and specify the ten differentiators before building them.
 
 ## Don't Forget
 
@@ -48,6 +52,8 @@ Use refreshed competitor/community evidence to rank the ten differentiators.
   exclusive until a matching benchmark or current competitor audit proves it.
 - Run unittest and `py_compile` sequentially because parallel runs race on pyc
   files. The current cache target is locked, so compile to a separate path.
+- Tk tests must run outside the desktop sandbox; inside it Tcl reports a false
+  `init.tcl` failure. A real desktop check reports Tcl/Tk 8.6.12.
 
 ## Why It's Built This Way
 
@@ -63,3 +69,4 @@ Use refreshed competitor/community evidence to rank the ten differentiators.
 - 2026-07-09 - Superseded the first tray-icon parity pass with distinct polished icons: Desktop uses `models\flow.ico` with the red F in front of the waveform/graph paper, while the tray uses `models\flow-tray.ico`, a shaded grey mic with the red F centered in the mic head.
 - 2026-07-09 - Centered the floating waveform bar's mic badge around the 26px pill midpoint (`mid = 13`), with a 12.8px circle and smaller mic glyph so it no longer hangs high or low inside the bar.
 - 2026-07-11 - Made transcript insertion precede non-critical history persistence because user-visible delivery must survive storage errors and should not wait for WAV/fsync work.
+- 2026-07-11 - Lazy-loaded PortAudio in parallel with the speech model and reduced overlay polling to 20 ms because profiling showed audio import was the largest avoidable startup cost and 100 ms polling dominated visual response.
