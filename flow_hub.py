@@ -86,6 +86,7 @@ class Switch(tk.Canvas):
 class Hub:
     NAV = [
         ("history", "History"),
+        ("recovery", "Recovery"),
         ("dictionary", "Dictionary"),
         ("general", "General"),
         ("dictation", "Dictation"),
@@ -112,6 +113,8 @@ class Hub:
         self._scroll_window = None
         self._grid_after = None
         self.history_records = []
+        self.recovery_records = []
+        self.recovery_badge = None
         self.dictionary_rules = []
         self.mic_map = {"System default": None}
         self._init_vars()
@@ -172,8 +175,8 @@ class Hub:
             fg=c["muted"], bg=c["paper2"],
         ).pack(anchor="w")
 
-        for index, (key, label) in enumerate(self.NAV):
-            if index == 2:
+        for _index, (key, label) in enumerate(self.NAV):
+            if key == "general":
                 tk.Label(
                     self.sidebar, text="SETTINGS", font=("Segoe UI Semibold", 8),
                     fg=c["muted"], bg=c["paper2"],
@@ -187,9 +190,18 @@ class Hub:
                 fg=c["text"], bg=c["paper2"], cursor="hand2",
             )
             text.pack(side="left", fill="x", expand=True, pady=7)
-            for widget in (row, icon, text):
+            widgets = [row, icon, text]
+            if key == "recovery":
+                self.recovery_badge = tk.Label(
+                    row, text="", font=("Segoe UI Semibold", 8),
+                    fg=c["paper"], bg=c["brand"], padx=6, pady=1,
+                    cursor="hand2",
+                )
+                widgets.append(self.recovery_badge)
+            for widget in widgets:
                 widget.bind("<Button-1>", lambda _e, page=key: self.show_page(page))
             self.nav_rows[key] = (row, icon, text)
+        self._update_recovery_badge()
         tk.Label(
             self.sidebar, text="Flow State | offline", font=("Segoe UI", 8),
             fg=c["muted"], bg=c["paper2"],
@@ -254,6 +266,11 @@ class Hub:
         if key == "history":
             icon.create_oval(3, 3, 15, 15, outline=color, width=1.5)
             icon.create_line(9, 5, 9, 9, 12, 11, fill=color, width=1.5)
+        elif key == "recovery":
+            icon.create_oval(2, 2, 16, 16, outline=color, width=1.5)
+            icon.create_oval(6, 6, 12, 12, outline=color, width=1.2)
+            icon.create_line(4, 4, 7, 7, 11, 11, 14, 14, fill=color, width=1.2)
+            icon.create_line(14, 4, 11, 7, 7, 11, 4, 14, fill=color, width=1.2)
         elif key == "dictionary":
             icon.create_rectangle(2, 3, 8, 15, outline=color)
             icon.create_rectangle(10, 3, 16, 15, outline=color)
@@ -413,6 +430,19 @@ class Hub:
     def show_current(self):
         self.show_page(self.current_page)
 
+    def _update_recovery_badge(self, count=None):
+        if count is None:
+            try:
+                count = len(self.app.RECOVERY.orphans())
+            except (OSError, ValueError):
+                count = 0
+        if self.recovery_badge and self.recovery_badge.winfo_exists():
+            if count:
+                self.recovery_badge.configure(text=str(count))
+                self.recovery_badge.pack(side="right", padx=(4, 9), pady=6)
+            else:
+                self.recovery_badge.pack_forget()
+
     def show_page(self, key):
         self.current_page = key
         for page, (row, icon, label) in self.nav_rows.items():
@@ -423,8 +453,15 @@ class Hub:
             icon.configure(bg=bg)
             label.configure(bg=bg, fg=fg, font=("Segoe UI Semibold" if active else "Segoe UI", 10))
         title = dict(self.NAV)[key]
-        self.eyebrow.configure(text="SETTINGS" if key not in ("history", "dictionary") else "FLOW STATE")
+        if key == "recovery":
+            eyebrow = "LOCAL SAFETY"
+        elif key in ("history", "dictionary"):
+            eyebrow = "FLOW STATE"
+        else:
+            eyebrow = "SETTINGS"
+        self.eyebrow.configure(text=eyebrow)
         self.title.configure(text=title)
+        self.status.configure(text="Ready", fg=self.colors["success"])
         self._clear_page()
         renderer = getattr(self, "_page_" + key)
         renderer()
@@ -677,6 +714,168 @@ class Hub:
         self._button(controls, "Add", add_rule, primary=True).pack(side="left", padx=7)
         self._button(controls, "Delete", delete_rule, danger=True).pack(side="left")
         controls.pack(fill="x", padx=16, pady=(0, 12))
+
+    def _page_recovery(self):
+        self._intro("Interrupted dictations stay here until you recover or remove them.")
+        try:
+            self.recovery_records = self.app.RECOVERY.orphans()
+        except (OSError, ValueError) as exc:
+            self.recovery_records = []
+            section = self._section("Recovery could not be opened")
+            tk.Label(
+                section,
+                text="Your files were left untouched. " + str(exc),
+                font=("Segoe UI", 9), fg=self.colors["danger"],
+                bg=self.colors["paper"], wraplength=580, justify="left",
+            ).pack(anchor="w", padx=16, pady=(0, 14))
+            self.status.configure(text="Recovery unavailable", fg=self.colors["danger"])
+            return
+
+        count = len(self.recovery_records)
+        self._update_recovery_badge(count)
+        self.status.configure(
+            text=f"{count} recoverable" if count else "Ready",
+            fg=self.colors["success"],
+        )
+        if not self.recovery_records:
+            section = self._section("Nothing needs recovery")
+            tk.Label(
+                section,
+                text="Interrupted dictations will appear here automatically. "
+                     "Completed dictations remain in History.",
+                font=("Segoe UI", 9), fg=self.colors["muted"],
+                bg=self.colors["paper"], wraplength=580, justify="left",
+            ).pack(anchor="w", padx=16, pady=(0, 14))
+            return
+
+        section = self._section(
+            "Interrupted dictations",
+            "Newest first. Recovery files stay on this PC and are never removed automatically.",
+        )
+        body = tk.Frame(section, bg=self.colors["paper"])
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        self.recovery_list = tk.Listbox(
+            body, width=31, height=15, font=("Segoe UI", 9),
+            bg=self.colors["paper2"], fg=self.colors["text"], relief="flat",
+            highlightthickness=1, highlightbackground=self.colors["border"],
+            selectbackground=self.colors["major"], selectforeground=self.colors["text"],
+            activestyle="none",
+        )
+        self.recovery_list.pack(side="left", fill="both", expand=True)
+        for record in self.recovery_records:
+            stamp = record.get("started", "").replace("T", " ")[5:16] or "Unknown time"
+            profile = str(record.get("profile", "default")).replace("_", " ").title()
+            segments = record.get("segments", 0)
+            self.recovery_list.insert("end", f"{stamp}  {profile}  ({segments} segments)")
+
+        right = tk.Frame(body, bg=self.colors["paper"])
+        right.pack(side="left", fill="both", expand=True, padx=(12, 0))
+        tk.Label(
+            right, text="RECOVERED TEXT", font=("Segoe UI Semibold", 8),
+            fg=self.colors["muted"], bg=self.colors["paper"],
+        ).pack(anchor="w", pady=(0, 5))
+        self.recovery_text = tk.Text(
+            right, width=39, height=11, wrap="word", font=("Segoe UI", 9),
+            bg=self.colors["paper2"], fg=self.colors["text"], relief="flat",
+            highlightthickness=1, highlightbackground=self.colors["border"],
+            padx=9, pady=9,
+        )
+        self.recovery_text.pack(fill="both", expand=True)
+        self.recovery_text.configure(state="disabled")
+        self.recovery_meta = tk.Label(
+            right, text="", font=("Segoe UI", 8), fg=self.colors["muted"],
+            bg=self.colors["paper"], anchor="w",
+        )
+        self.recovery_meta.pack(fill="x", pady=(7, 0))
+        buttons = tk.Frame(right, bg=self.colors["paper"])
+        buttons.pack(fill="x", pady=(8, 0))
+        self._button(buttons, "Copy text", self.copy_recovery).pack(side="left", padx=(0, 6))
+        self._button(
+            buttons, "Retry delivery", self.retry_recovery, primary=True,
+        ).pack(side="left", padx=(0, 6))
+        self._button(
+            buttons, "Remove...", self.delete_recovery, danger=True,
+        ).pack(side="left")
+        self.recovery_list.bind("<<ListboxSelect>>", self.select_recovery)
+        self.recovery_list.selection_set(0)
+        self.select_recovery()
+
+    def _selected_recovery(self):
+        selection = self.recovery_list.curselection() if hasattr(self, "recovery_list") else ()
+        return self.recovery_records[selection[0]] if selection else None
+
+    def select_recovery(self, _event=None):
+        record = self._selected_recovery()
+        if not record:
+            return
+        text = record.get("text", "") or "No recognized text was saved."
+        self.recovery_text.configure(state="normal")
+        self.recovery_text.delete("1.0", "end")
+        self.recovery_text.insert("1.0", text)
+        self.recovery_text.configure(state="disabled")
+        started = record.get("started", "").replace("T", " ") or "Unknown time"
+        profile = str(record.get("profile", "default")).replace("_", " ").title()
+        self.recovery_meta.configure(
+            text=f"{record.get('segments', 0)} saved segments  |  {profile}  |  {started}"
+        )
+
+    def copy_recovery(self):
+        record = self._selected_recovery()
+        if record and record.get("text"):
+            pyperclip.copy(record["text"])
+            self.flash("Recovered text copied")
+
+    def retry_recovery(self):
+        record = self._selected_recovery()
+        if not record or not record.get("text"):
+            self.flash("No recovered text to deliver")
+            return
+        if not messagebox.askyesno(
+            "Retry recovered text",
+            "Flow State will hide the Hub and send this text to the app behind it. Continue?",
+            parent=self.top,
+        ):
+            return
+        self.top.withdraw()
+        self.status.configure(text="Retrying delivery...", fg=self.colors["brand"])
+
+        def work():
+            try:
+                result = self.app.deliver_text(
+                    record["text"], trailing_space=False,
+                    original=record["text"], profile=record.get("profile", "default"),
+                    source="recovery",
+                )
+                if result and self.app.RECOVERY.complete(record["id"]):
+                    message = "Recovered text delivered"
+                elif result:
+                    message = "Delivered; recovery copy kept"
+                else:
+                    message = "Delivered; recovery kept because history was not saved"
+            except Exception as exc:
+                message = "Delivery failed; recovery kept: " + str(exc)
+            self.top.after(0, lambda: (self.show(), self.flash(message)))
+
+        self.top.after(
+            180,
+            lambda: threading.Thread(target=work, daemon=True).start(),
+        )
+
+    def delete_recovery(self):
+        record = self._selected_recovery()
+        if not record:
+            return
+        if not messagebox.askyesno(
+            "Remove recovered dictation",
+            "Permanently remove this recovered text? This cannot be undone.",
+            parent=self.top,
+        ):
+            return
+        if self.app.RECOVERY.complete(record["id"]):
+            self.flash("Recovered dictation removed")
+            self.show_current()
+        else:
+            self.flash("Recovery file was already unavailable")
 
     def _page_history(self):
         self._intro("Search, copy, play, retry, or remove saved dictations.")

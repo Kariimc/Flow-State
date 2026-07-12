@@ -77,7 +77,9 @@ each of them.
 - [x] #1 Crash Journal - fsynced partial segments wired into normal, command,
   and continuous dictation; 20-write p95 4.7 ms; containment bite proof and
   full suite verified 2026-07-11.
-- [ ] #2 Recovery Inbox
+- [ ] #2 Recovery Inbox - orphan text journals now have a native Hub inbox,
+  copy, guarded retry delivery, confirmed contained removal, and native visual
+  verification. Recoverable audio/re-transcription remains before completion.
 - [ ] #3 Pause and Resume
 - [ ] #4 Focus Lock
 - [x] #5 Clipboard Shield - sequence-aware restore plus direct-typing fallback;

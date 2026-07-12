@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-11
-**Last verified:** full desktop-context discovery ran 26 tests OK in 12.695s; 7 Python files compiled to an isolated cache; Crash Journal append benchmark median 3.3 ms/p95 5.6 ms; containment and hotkey wiring tests both proved red against removed guards and green restored; `flow.py` non-ASCII scan is empty; `git diff --check` passed.
+**Last verified:** full desktop-context discovery ran 31 tests OK in 33.464s; 7 Python files compiled to an isolated cache; Recovery Inbox was visually checked in the native dark-mode Hub; its history-save guard proved red when removed and green restored; `git diff --check` passed.
 
 ## Where We Are
 
@@ -15,7 +15,7 @@ polish cleanup, and a modern Hub options screen.
 
 The Hub now has a paper/graph-paper layout, dark mode, a heavy red F brand,
 red toggle knobs on neutral tracks, sidebar icon nav, and pages for History,
-Dictionary, General, Dictation, Audio & mic, Appearance, Privacy, Files &
+Recovery, Dictionary, General, Dictation, Audio & mic, Appearance, Privacy, Files &
 meetings, and Statistics. Header/title clipping was fixed by reducing the
 Georgia header sizes and increasing header height.
 
@@ -38,11 +38,18 @@ under `data/recovery/` during normal, command, and continuous sessions. A
 successful final history save removes the temporary journal; a crash or failed
 save leaves it available for Recovery Inbox.
 
+Recovery Inbox's text path is implemented in the Hub. It lists orphan journals
+with a sidebar count, shows the recovered text and metadata, copies it, retries
+delivery after hiding the Hub, and confirms removal. Retry deletes the journal
+only when History persistence succeeds; failed delivery or failed history save
+keeps the recovery copy. Recoverable audio/re-transcription is still required
+before differentiator #2 is complete.
+
 ## Do Next
 
-Build #2 Recovery Inbox in the Hub: list orphan journals, copy/retry them, and
-delete only contained recovery files. Retry the live Notepad stop-to-insert
-measurement when desktop process launch is available again.
+Finish #2 Recovery Inbox by attaching stopped-session audio to its contained
+journal and retrying transcription when that audio exists. Retry the live
+Notepad stop-to-insert measurement when desktop process launch is available.
 
 ## Don't Forget
 
@@ -89,3 +96,4 @@ measurement when desktop process launch is available again.
 - 2026-07-11 - Scoped “ten unique features” to documented gaps across Wispr Flow, Aqua Voice, and Superwhisper, and chose sequence-aware Clipboard Shield first because stale clipboard restoration can overwrite newer user data.
 - 2026-07-11 - Fsynced recognized segments into a contained Crash Journal because long dictations must survive process interruption; journals are deleted only after final history persistence succeeds.
 - 2026-07-11 - Replaced corrupted console glyphs with ASCII because `start_recording()` raised `UnicodeEncodeError` before stdout reconfiguration in direct/test invocation.
+- 2026-07-12 - Kept Recovery Inbox journals until both redelivery and History save succeed because inserted text without durable History must remain recoverable.

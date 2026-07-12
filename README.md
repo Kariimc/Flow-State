@@ -16,7 +16,7 @@ once. After that, use `run.bat` or the Desktop shortcut.
 ## Run It
 
 It starts by itself when Windows boots. The **Flow State** Desktop icon opens
-the Hub: history, dictionary, shortcuts, dictation behavior, audio, appearance,
+the Hub: history, recovery, dictionary, shortcuts, dictation behavior, audio, appearance,
 privacy, file transcription, and stats.
 
 1. Double-click `run.bat`, or open the Desktop shortcut.
@@ -40,6 +40,10 @@ dictation is saved locally under `data/`.
 While you speak, completed segments are also written to `data/recovery/`.
 Successful dictations remove that temporary journal; an interrupted session
 leaves it intact for the Recovery Inbox.
+
+Open **Recovery** in the Hub to copy an interrupted transcript, retry delivery
+to the app behind the Hub, or permanently remove it. Retry keeps the recovery
+copy unless the delivered text is also saved successfully in History.
 
 ## What It Does To Your Speech
 

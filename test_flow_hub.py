@@ -32,6 +32,37 @@ class FakeHistory:
         return False
 
 
+class FakeRecovery:
+    def __init__(self):
+        self.records = [{
+            "id": "20260712-094200-abcdef12",
+            "started": "2026-07-12T09:42:00",
+            "profile": "notes",
+            "source": "dictation",
+            "text": "Recovered launch notes",
+            "segments": 2,
+        }]
+        self.completed = []
+
+    def orphans(self):
+        return list(self.records)
+
+    def complete(self, session_id):
+        if session_id not in {record["id"] for record in self.records}:
+            return False
+        self.completed.append(session_id)
+        self.records = [record for record in self.records if record["id"] != session_id]
+        return True
+
+
+class ImmediateThread:
+    def __init__(self, *, target, daemon):
+        self.target = target
+
+    def start(self):
+        self.target()
+
+
 def buttons(widget):
     found = []
     for child in widget.winfo_children():
@@ -44,6 +75,7 @@ def buttons(widget):
 class HubControlTests(unittest.TestCase):
     PAGE_BUTTONS = {
         "history": {"Copy", "Play", "Retry", "Delete"},
+        "recovery": {"Copy text", "Retry delivery", "Remove..."},
         "dictionary": {"Add word", "Add", "Delete"},
         "general": set(),
         "dictation": set(),
@@ -62,6 +94,7 @@ class HubControlTests(unittest.TestCase):
             mock.patch.object(flow, "BASE_DIR", self.temp.name),
             mock.patch.object(flow, "DICT", SimpleNamespace(path=str(Path(self.temp.name) / "dictionary.txt"))),
             mock.patch.object(flow, "HISTORY", FakeHistory()),
+            mock.patch.object(flow, "RECOVERY", FakeRecovery()),
             mock.patch.object(flow, "get_autostart", return_value=False),
             mock.patch.object(flow, "available_microphones", return_value=[]),
             mock.patch.object(flow, "save_settings"),
@@ -69,6 +102,9 @@ class HubControlTests(unittest.TestCase):
             mock.patch.object(Hub, "test_microphone"),
             mock.patch.object(Hub, "clear_history"),
             mock.patch.object(Hub, "choose_wav"),
+            mock.patch.object(Hub, "copy_recovery"),
+            mock.patch.object(Hub, "retry_recovery"),
+            mock.patch.object(Hub, "delete_recovery"),
         ]
         for patcher in self.patches:
             patcher.start()
@@ -101,6 +137,99 @@ class HubControlTests(unittest.TestCase):
         flow.save_settings.assert_called_once()
         flow.set_autostart.assert_called_once()
         footer["Reset page"].invoke()
+
+
+class RecoveryInboxBehaviorTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.recovery = FakeRecovery()
+        self.patches = [
+            mock.patch.object(flow, "BASE_DIR", self.temp.name),
+            mock.patch.object(
+                flow, "DICT",
+                SimpleNamespace(path=str(Path(self.temp.name) / "dictionary.txt")),
+            ),
+            mock.patch.object(flow, "HISTORY", FakeHistory()),
+            mock.patch.object(flow, "RECOVERY", self.recovery),
+            mock.patch.object(flow, "get_autostart", return_value=False),
+            mock.patch.object(flow, "available_microphones", return_value=[]),
+        ]
+        for patcher in self.patches:
+            patcher.start()
+        self.hub = Hub(self.root, flow)
+        self.hub.show_page("recovery")
+        self.root.update_idletasks()
+
+    def tearDown(self):
+        self.hub.top.destroy()
+        self.root.destroy()
+        for patcher in reversed(self.patches):
+            patcher.stop()
+        self.temp.cleanup()
+
+    def test_copy_uses_selected_recovered_text(self):
+        with mock.patch("flow_hub.pyperclip.copy") as copy:
+            self.hub.copy_recovery()
+        copy.assert_called_once_with("Recovered launch notes")
+
+    def test_confirmed_remove_uses_guarded_recovery_delete(self):
+        with mock.patch("flow_hub.messagebox.askyesno", return_value=True):
+            self.hub.delete_recovery()
+        self.assertEqual(
+            self.recovery.completed,
+            ["20260712-094200-abcdef12"],
+        )
+        self.assertEqual(self.recovery.records, [])
+
+    def test_successful_retry_delivers_then_removes_recovery_copy(self):
+        with (
+            mock.patch("flow_hub.messagebox.askyesno", return_value=True),
+            mock.patch("flow_hub.threading.Thread", ImmediateThread),
+            mock.patch.object(self.hub.top, "after", side_effect=lambda _delay, callback: callback()),
+            mock.patch.object(self.hub, "show"),
+            mock.patch.object(self.hub, "flash"),
+            mock.patch.object(flow, "deliver_text", return_value={"id": "history"}) as deliver,
+        ):
+            self.hub.retry_recovery()
+        deliver.assert_called_once_with(
+            "Recovered launch notes",
+            trailing_space=False,
+            original="Recovered launch notes",
+            profile="notes",
+            source="recovery",
+        )
+        self.assertEqual(
+            self.recovery.completed,
+            ["20260712-094200-abcdef12"],
+        )
+
+    def test_failed_retry_keeps_recovery_copy(self):
+        with (
+            mock.patch("flow_hub.messagebox.askyesno", return_value=True),
+            mock.patch("flow_hub.threading.Thread", ImmediateThread),
+            mock.patch.object(self.hub.top, "after", side_effect=lambda _delay, callback: callback()),
+            mock.patch.object(self.hub, "show"),
+            mock.patch.object(self.hub, "flash"),
+            mock.patch.object(flow, "deliver_text", side_effect=RuntimeError("locked")),
+        ):
+            self.hub.retry_recovery()
+        self.assertEqual(self.recovery.completed, [])
+        self.assertEqual(len(self.recovery.records), 1)
+
+    def test_retry_keeps_recovery_copy_when_history_save_fails(self):
+        with (
+            mock.patch("flow_hub.messagebox.askyesno", return_value=True),
+            mock.patch("flow_hub.threading.Thread", ImmediateThread),
+            mock.patch.object(self.hub.top, "after", side_effect=lambda _delay, callback: callback()),
+            mock.patch.object(self.hub, "show"),
+            mock.patch.object(self.hub, "flash"),
+            mock.patch.object(flow, "deliver_text", return_value=None),
+        ):
+            self.hub.retry_recovery()
+        self.assertEqual(self.recovery.completed, [])
+        self.assertEqual(len(self.recovery.records), 1)
 
 
 if __name__ == "__main__":
