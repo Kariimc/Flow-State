@@ -597,6 +597,14 @@ def beep(start: bool) -> None:
 
 # ---------------------------------------------------------------- output
 
+def clipboard_sequence() -> int | None:
+    """Return Windows' clipboard change counter when available."""
+    try:
+        return int(ctypes.windll.user32.GetClipboardSequenceNumber())
+    except Exception:
+        return None
+
+
 def inject(text: str, trailing_space: bool = True) -> None:
     # If the user is still holding the hotkey (or any modifier), a synthetic
     # Ctrl+V would turn into Ctrl+Win+V etc. and paste nowhere â€” wait for
@@ -616,11 +624,21 @@ def inject(text: str, trailing_space: bool = True) -> None:
         old = pyperclip.paste()
     except Exception:
         pass  # clipboard held an image or was locked â€” nothing to restore
-    pyperclip.copy(text + (" " if trailing_space else ""))
+    payload = text + (" " if trailing_space else "")
+    try:
+        pyperclip.copy(payload)
+    except Exception:
+        keyboard.write(payload, delay=TYPE_DELAY)
+        return
+    inserted_sequence = clipboard_sequence()
     keyboard.send("ctrl+v")
     if old is not None:
         # wait so even slow apps read the clipboard before we put it back
         time.sleep(1.2)
+        current_sequence = clipboard_sequence()
+        if (inserted_sequence is not None
+                and current_sequence != inserted_sequence):
+            return  # a person or another app put newer data on the clipboard
         try:
             pyperclip.copy(old)
         except Exception:

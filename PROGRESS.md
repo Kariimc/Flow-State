@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-11
-**Last verified:** full desktop-context discovery ran 17 tests OK in 15.657s, including all 9 Hub pages and 11 page-specific command buttons; 6 Python files compiled to an isolated cache; startup import+engine-warm median improved from 4413.4 ms to 3416.2 ms across 3+3 clean processes (22.6%); overlay event ceiling is now 20 ms; `git diff --check` passed.
+**Last verified:** full desktop-context discovery ran 20 tests OK in 13.916s, including all 9 Hub pages, 11 page-specific command buttons, and Clipboard Shield failure paths; 7 Python files compiled to an isolated cache; Clipboard Shield guard-removal test went red and restored guard went green; `git diff --check` passed.
 
 ## Where We Are
 
@@ -28,11 +28,16 @@ audio initialization is lazy and overlaps model loading. The startup benchmark
 raw samples were old 10048.0/4232.6/4413.4 ms and new
 3476.3/3416.2/3046.1 ms; medians are used because the first old run was cold.
 
+`DIFFERENTIATORS.md` is the evidence-backed ten-feature contract. Feature #5,
+Clipboard Shield, is implemented: it restores the prior clipboard only when
+the Windows clipboard change counter proves no newer data appeared, and falls
+back to direct typing if clipboard access is locked.
+
 ## Do Next
 
-Measure stop-to-insert median/p95 in a live Notepad run. Finish the current
-competitor/community audit, then rank and specify the ten differentiators
-before building them.
+Build #1 Crash Journal and its data-integrity tests, then #2 Recovery Inbox.
+Retry the live Notepad stop-to-insert measurement when desktop process launch
+is available again.
 
 ## Don't Forget
 
@@ -57,6 +62,9 @@ before building them.
 - `benchmark_flow.py` is the repeatable baseline command. Its 2026-07-11 quick
   run: import median 604.8 ms/p95 790.4 ms, text finish median 0.2 ms/p95
   0.6 ms, text history median 2.3 ms, 10-second audio history median 3.8 ms.
+- The live Notepad launch attempt was blocked by the desktop execution service's
+  temporary usage limit, not by Flow State. Do not substitute a synthetic test;
+  retry the real run when launch access returns.
 
 ## Why It's Built This Way
 
@@ -73,3 +81,4 @@ before building them.
 - 2026-07-09 - Centered the floating waveform bar's mic badge around the 26px pill midpoint (`mid = 13`), with a 12.8px circle and smaller mic glyph so it no longer hangs high or low inside the bar.
 - 2026-07-11 - Made transcript insertion precede non-critical history persistence because user-visible delivery must survive storage errors and should not wait for WAV/fsync work.
 - 2026-07-11 - Lazy-loaded PortAudio in parallel with the speech model and reduced overlay polling to 20 ms because profiling showed audio import was the largest avoidable startup cost and 100 ms polling dominated visual response.
+- 2026-07-11 - Scoped “ten unique features” to documented gaps across Wispr Flow, Aqua Voice, and Superwhisper, and chose sequence-aware Clipboard Shield first because stale clipboard restoration can overwrite newer user data.
