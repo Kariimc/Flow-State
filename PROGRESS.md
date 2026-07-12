@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-11
-**Last verified:** full desktop-context discovery ran 20 tests OK in 13.916s, including all 9 Hub pages, 11 page-specific command buttons, and Clipboard Shield failure paths; 7 Python files compiled to an isolated cache; Clipboard Shield guard-removal test went red and restored guard went green; `git diff --check` passed.
+**Last verified:** full desktop-context discovery ran 26 tests OK in 12.695s; 7 Python files compiled to an isolated cache; Crash Journal append benchmark median 3.3 ms/p95 5.6 ms; containment and hotkey wiring tests both proved red against removed guards and green restored; `flow.py` non-ASCII scan is empty; `git diff --check` passed.
 
 ## Where We Are
 
@@ -33,11 +33,16 @@ Clipboard Shield, is implemented: it restores the prior clipboard only when
 the Windows clipboard change counter proves no newer data appeared, and falls
 back to direct typing if clipboard access is locked.
 
+Feature #1 Crash Journal is implemented. Every recognized segment is fsynced
+under `data/recovery/` during normal, command, and continuous sessions. A
+successful final history save removes the temporary journal; a crash or failed
+save leaves it available for Recovery Inbox.
+
 ## Do Next
 
-Build #1 Crash Journal and its data-integrity tests, then #2 Recovery Inbox.
-Retry the live Notepad stop-to-insert measurement when desktop process launch
-is available again.
+Build #2 Recovery Inbox in the Hub: list orphan journals, copy/retry them, and
+delete only contained recovery files. Retry the live Notepad stop-to-insert
+measurement when desktop process launch is available again.
 
 ## Don't Forget
 
@@ -82,3 +87,5 @@ is available again.
 - 2026-07-11 - Made transcript insertion precede non-critical history persistence because user-visible delivery must survive storage errors and should not wait for WAV/fsync work.
 - 2026-07-11 - Lazy-loaded PortAudio in parallel with the speech model and reduced overlay polling to 20 ms because profiling showed audio import was the largest avoidable startup cost and 100 ms polling dominated visual response.
 - 2026-07-11 - Scoped “ten unique features” to documented gaps across Wispr Flow, Aqua Voice, and Superwhisper, and chose sequence-aware Clipboard Shield first because stale clipboard restoration can overwrite newer user data.
+- 2026-07-11 - Fsynced recognized segments into a contained Crash Journal because long dictations must survive process interruption; journals are deleted only after final history persistence succeeds.
+- 2026-07-11 - Replaced corrupted console glyphs with ASCII because `start_recording()` raised `UnicodeEncodeError` before stdout reconfiguration in direct/test invocation.

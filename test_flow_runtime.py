@@ -75,5 +75,66 @@ class DeliveryTests(unittest.TestCase):
         write.assert_called_once_with("dictated", delay=flow.TYPE_DELAY)
 
 
+class RecoveryRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        flow.recovery_session = None
+        flow.recovery_failed = False
+
+    def tearDown(self):
+        flow.recovery_session = None
+        flow.recovery_failed = False
+
+    def test_recovery_lifecycle_journals_partial_then_completes(self):
+        recovery = mock.Mock()
+        recovery.begin.return_value = "20260711-120000-12345678"
+        with mock.patch.object(flow, "RECOVERY", recovery):
+            flow.begin_recovery("notes", "dictation")
+            flow.journal_partial("recover me")
+            flow.finish_recovery(success=True)
+
+        recovery.begin.assert_called_once_with(profile="notes", source="dictation")
+        recovery.append.assert_called_once_with(
+            "20260711-120000-12345678", "recover me"
+        )
+        recovery.complete.assert_called_once_with("20260711-120000-12345678")
+        self.assertIsNone(flow.recovery_session)
+
+    def test_failed_final_save_keeps_recovery_journal(self):
+        recovery = mock.Mock()
+        recovery.begin.return_value = "20260711-120000-12345678"
+        with mock.patch.object(flow, "RECOVERY", recovery):
+            flow.begin_recovery("notes", "dictation")
+            flow.finish_recovery(success=False)
+
+        recovery.complete.assert_not_called()
+        self.assertIsNone(flow.recovery_session)
+
+    def test_recording_start_opens_journal_for_every_mode(self):
+        """BITE-PROOF: removing begin_recovery from start_recording makes this fail."""
+        original = (flow.command_mode, flow.continuous_mode, flow.vad_enabled)
+        try:
+            flow.vad_enabled = False
+            for command, continuous, source in (
+                (False, False, "dictation"),
+                (True, False, "command"),
+                (False, True, "continuous"),
+            ):
+                with self.subTest(source=source):
+                    flow.recording = False
+                    flow.command_mode = command
+                    flow.continuous_mode = continuous
+                    with (
+                        mock.patch.object(flow, "begin_recovery") as begin,
+                        mock.patch.object(flow, "current_profile", return_value="notes"),
+                        mock.patch.object(flow, "beep"),
+                        mock.patch.object(flow, "ui_events"),
+                    ):
+                        flow.start_recording()
+                    begin.assert_called_once_with("notes", source)
+        finally:
+            flow.recording = False
+            flow.command_mode, flow.continuous_mode, flow.vad_enabled = original
+
+
 if __name__ == "__main__":
     unittest.main()

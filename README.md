@@ -37,6 +37,10 @@ window if one is open.
 After you stop speaking, the transcript appears in the active app. The same
 dictation is saved locally under `data/`.
 
+While you speak, completed segments are also written to `data/recovery/`.
+Successful dictations remove that temporary journal; an interrupted session
+leaves it intact for the Recovery Inbox.
+
 ## What It Does To Your Speech
 
 - Removes filler words like "um", "uh", and "erm".

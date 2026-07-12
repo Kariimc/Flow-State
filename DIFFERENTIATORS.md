@@ -74,7 +74,9 @@ each of them.
 
 ## Implementation Status
 
-- [ ] #1 Crash Journal
+- [x] #1 Crash Journal - fsynced partial segments wired into normal, command,
+  and continuous dictation; 20-write p95 4.7 ms; containment bite proof and
+  full suite verified 2026-07-11.
 - [ ] #2 Recovery Inbox
 - [ ] #3 Pause and Resume
 - [ ] #4 Focus Lock

@@ -9,6 +9,7 @@ import numpy as np
 
 from flow_features import (
     HistoryStore,
+    RecoveryJournal,
     apply_vocabulary,
     apply_spoken_correction,
     choose_profile,
@@ -134,6 +135,46 @@ class HistoryStoreTests(unittest.TestCase):
             store.rewrite(records)
             self.assertEqual(store.prune(30), 1)
             self.assertFalse(Path(old["audio_path"]).exists())
+
+
+class RecoveryJournalTests(unittest.TestCase):
+    def test_partial_text_survives_as_an_orphan_session(self):
+        with tempfile.TemporaryDirectory() as temp:
+            journal = RecoveryJournal(temp)
+            session_id = journal.begin(profile="notes", source="dictation")
+            journal.append(session_id, "First recovered segment")
+            journal.append(session_id, "second segment")
+
+            self.assertEqual(
+                journal.orphans(),
+                [{
+                    "id": session_id,
+                    "started": journal.orphans()[0]["started"],
+                    "profile": "notes",
+                    "source": "dictation",
+                    "text": "First recovered segment second segment",
+                    "segments": 2,
+                }],
+            )
+
+    def test_complete_removes_owned_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            journal = RecoveryJournal(temp)
+            session_id = journal.begin()
+            journal.append(session_id, "done")
+            self.assertTrue(journal.complete(session_id))
+            self.assertEqual(journal.orphans(), [])
+
+    def test_complete_never_deletes_outside_recovery_directory(self):
+        """BITE-PROOF: removing session-id validation unlinks outside.jsonl."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            outside = root / "outside.jsonl"
+            outside.write_text("keep", encoding="utf-8")
+            journal = RecoveryJournal(root / "data")
+
+            self.assertFalse(journal.complete("../../outside"))
+            self.assertTrue(outside.exists())
 
 
 if __name__ == "__main__":

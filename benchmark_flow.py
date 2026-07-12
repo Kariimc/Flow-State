@@ -56,7 +56,7 @@ def run(include_engine=False):
     report = {"startup_import": startup_import(5)}
 
     import flow
-    from flow_features import HistoryStore
+    from flow_features import HistoryStore, RecoveryJournal
 
     phrase = (
         "um actually bullet startup speed bullet reliable insertion "
@@ -74,6 +74,12 @@ def run(include_engine=False):
         report["history_with_10s_audio"] = timed(
             lambda: store.add(original="test", final="Test.", audio=audio), 10
         )
+        recovery = RecoveryJournal(temp)
+        recovery_id = recovery.begin(profile="notes", source="benchmark")
+        report["recovery_append"] = timed(
+            lambda: recovery.append(recovery_id, "Recoverable segment"), 20
+        )
+        recovery.complete(recovery_id)
 
     if include_engine:
         started = time.perf_counter()

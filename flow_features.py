@@ -390,3 +390,99 @@ class HistoryStore:
             "average_latency": round(sum(latencies) / len(latencies), 2) if latencies else 0.0,
             "top_profile": profiles.most_common(1)[0][0] if profiles else "default",
         }
+
+
+class RecoveryJournal:
+    """Durable partial transcripts that survive an interrupted session."""
+
+    SESSION_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$")
+
+    def __init__(self, root: str | os.PathLike):
+        self.root = Path(root).resolve()
+        self.directory = self.root / "recovery"
+
+    def _path(self, session_id: str) -> Path | None:
+        if not self.SESSION_ID.fullmatch(str(session_id)):
+            return None
+        candidate = (self.directory / f"{session_id}.jsonl").resolve()
+        try:
+            candidate.relative_to(self.directory.resolve())
+        except ValueError:
+            return None
+        return candidate
+
+    def _append_event(self, path: Path, event: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(json.dumps(event, ensure_ascii=False) + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+
+    def begin(self, *, profile: str = "default", source: str = "dictation") -> str:
+        now = datetime.now()
+        session_id = now.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
+        path = self._path(session_id)
+        if path is None:
+            raise ValueError("Could not create a valid recovery session id")
+        self._append_event(path, {
+            "event": "start",
+            "timestamp": now.isoformat(timespec="seconds"),
+            "profile": profile,
+            "source": source,
+        })
+        return session_id
+
+    def append(self, session_id: str, text: str) -> bool:
+        path = self._path(session_id)
+        cleaned = " ".join(str(text).split())
+        if path is None or not path.exists() or not cleaned:
+            return False
+        self._append_event(path, {
+            "event": "partial",
+            "timestamp": datetime.now().isoformat(timespec="milliseconds"),
+            "text": cleaned,
+        })
+        return True
+
+    def complete(self, session_id: str) -> bool:
+        path = self._path(session_id)
+        if path is None or not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def orphans(self) -> list[dict]:
+        sessions = []
+        try:
+            paths = sorted(
+                self.directory.glob("*.jsonl"),
+                key=lambda item: item.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return sessions
+        for path in paths:
+            start = {}
+            pieces = []
+            try:
+                with open(path, encoding="utf-8") as source:
+                    for line in source:
+                        try:
+                            event = json.loads(line)
+                        except (TypeError, ValueError):
+                            continue
+                        if event.get("event") == "start" and not start:
+                            start = event
+                        elif event.get("event") == "partial" and event.get("text"):
+                            pieces.append(" ".join(str(event["text"]).split()))
+            except OSError:
+                continue
+            sessions.append({
+                "id": path.stem,
+                "started": start.get("timestamp", ""),
+                "profile": start.get("profile", "default"),
+                "source": start.get("source", "dictation"),
+                "text": " ".join(pieces),
+                "segments": len(pieces),
+            })
+        return sessions

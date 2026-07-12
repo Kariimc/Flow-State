@@ -1,10 +1,10 @@
-"""Flow State â€” press a hotkey, speak, and the text appears in
+"""Flow State - press a hotkey, speak, and the text appears in
 whatever window you're using. Runs 100% locally.
 
 Dictate with the same keys, three ways (defaults):
-  * HOLD Ctrl+Win  â€” speak while holding, release to finish
-  * TAP  Ctrl+Win  â€” recording stays on; stops after a pause or another tap
-  * Ctrl+Win+Space â€” continuous mode: the mic stays open and text flows in
+  * HOLD Ctrl+Win  - speak while holding, release to finish
+  * TAP  Ctrl+Win  - recording stays on; stops after a pause or another tap
+  * Ctrl+Win+Space - continuous mode: the mic stays open and text flows in
                      as you speak, until you press it again
 Press Esc twice quickly to quit.
 """
@@ -32,6 +32,7 @@ import pyperclip
 from flow_features import (
     PROFILE_PRESETS,
     HistoryStore,
+    RecoveryJournal,
     apply_vocabulary,
     choose_profile,
     polish_text,
@@ -113,6 +114,7 @@ MOONSHINE_DIR = os.path.join(BASE_DIR, "models", "sherpa-onnx-moonshine-base-en-
 VAD_MODEL = os.path.join(BASE_DIR, "models", "silero_vad.onnx")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 HISTORY = HistoryStore(DATA_DIR)
+RECOVERY = RecoveryJournal(DATA_DIR)
 
 
 def active_process_name() -> str:
@@ -171,6 +173,44 @@ busy = threading.Lock()
 ACTIVE_ENGINE = None
 sd = None
 _audio_load_error = None
+recovery_session = None
+recovery_failed = False
+
+
+def begin_recovery(profile: str, source: str) -> None:
+    global recovery_session, recovery_failed
+    recovery_session = None
+    recovery_failed = False
+    try:
+        recovery_session = RECOVERY.begin(profile=profile, source=source)
+    except (OSError, ValueError) as exc:
+        print("Recovery journal could not start: %s" % exc)
+        ui_events.put(("notice", "Dictation works; crash recovery unavailable"))
+
+
+def journal_partial(text: str) -> None:
+    global recovery_failed
+    if not recovery_session or not text:
+        return
+    try:
+        if not RECOVERY.append(recovery_session, text):
+            recovery_failed = True
+    except (OSError, ValueError) as exc:
+        recovery_failed = True
+        print("Recovery journal write failed: %s" % exc)
+        ui_events.put(("notice", "Dictation works; recovery write failed"))
+
+
+def finish_recovery(success: bool) -> None:
+    global recovery_session
+    session_id = recovery_session
+    recovery_session = None
+    if not success or not session_id:
+        return
+    try:
+        RECOVERY.complete(session_id)
+    except OSError as exc:
+        print("Recovery journal cleanup failed: %s" % exc)
 
 
 def load_audio_backend():
@@ -191,7 +231,7 @@ def load_audio_backend():
 # ---------------------------------------------------------------- engines
 
 class MoonshineEngine:
-    """Moonshine base int8 via sherpa-onnx â€” ~14x faster than Whisper on
+    """Moonshine base int8 via sherpa-onnx - ~14x faster than Whisper on
     CPUs without AVX2, English only."""
 
     name = "Moonshine base (English)"
@@ -235,7 +275,7 @@ def load_engine():
     if ENGINE == "moonshine":
         if os.path.isdir(MOONSHINE_DIR):
             return MoonshineEngine()
-        print("Moonshine model folder missing (%s) â€” falling back to Whisper.\n"
+        print("Moonshine model folder missing (%s) - falling back to Whisper.\n"
               "See README.md for the model download command." % MOONSHINE_DIR)
     return WhisperEngine()
 
@@ -550,7 +590,7 @@ def make_icon() -> None:
 # ---------------------------------------------------------------- sounds
 
 def _make_cue(path: str, freqs, dur: float = 0.14, vol: float = 0.16) -> None:
-    """Write a soft sine chime (gentle fade in/out) â€” far kinder on the ears
+    """Write a soft sine chime (gentle fade in/out) - far kinder on the ears
     than winsound.Beep's harsh square wave."""
     import wave as wavemod
 
@@ -607,7 +647,7 @@ def clipboard_sequence() -> int | None:
 
 def inject(text: str, trailing_space: bool = True) -> None:
     # If the user is still holding the hotkey (or any modifier), a synthetic
-    # Ctrl+V would turn into Ctrl+Win+V etc. and paste nowhere â€” wait for
+    # Ctrl+V would turn into Ctrl+Win+V etc. and paste nowhere - wait for
     # their fingers to leave the keyboard first.
     deadline = time.time() + 2.0
     while time.time() < deadline and any(
@@ -623,7 +663,7 @@ def inject(text: str, trailing_space: bool = True) -> None:
     try:
         old = pyperclip.paste()
     except Exception:
-        pass  # clipboard held an image or was locked â€” nothing to restore
+        pass  # clipboard held an image or was locked - nothing to restore
     payload = text + (" " if trailing_space else "")
     try:
         pyperclip.copy(payload)
@@ -731,7 +771,7 @@ def _update_spectrum(mono: np.ndarray) -> None:
 #
 # Responsiveness architecture: while you speak, Silero VAD slices your
 # speech into utterances at natural pauses, and a background worker
-# transcribes each utterance IMMEDIATELY â€” so when you stop, only the last
+# transcribes each utterance IMMEDIATELY - so when you stop, only the last
 # couple of seconds still need processing instead of the whole recording.
 
 vad_queue = queue.Queue()   # ("audio", block) | ("reset",) | ("flush", event)
@@ -809,9 +849,10 @@ def vad_worker() -> None:
 
 
 def transcriber_worker() -> None:
-    """Transcribes utterances the moment the VAD finishes them â€” while the
+    """Transcribes utterances the moment the VAD finishes them - while the
     recording is still going. In continuous mode the text is pasted
     immediately; otherwise pieces collect until the dictation ends."""
+    global recovery_failed
     while True:
         kind, data = seg_queue.get()
         if kind == "end":
@@ -823,13 +864,14 @@ def transcriber_worker() -> None:
         text = ACTIVE_ENGINE.transcribe(data)
         if not text:
             continue
+        journal_partial(text)
         print("  piece (%.1fs audio, %.1fs work): %s"
               % (len(data) / SAMPLE_RATE, time.time() - t0, text))
         if continuous_mode:
             profile = current_profile()
             piece = finish_text(text, profile)
             if piece:
-                deliver_text(
+                record = deliver_text(
                     piece,
                     original=text,
                     audio=data,
@@ -839,6 +881,8 @@ def transcriber_worker() -> None:
                     profile=profile,
                     source="continuous",
                 )
+                if record is None:
+                    recovery_failed = True
         else:
             partials.append(text)
             ui_events.put(("partial", text))
@@ -906,7 +950,12 @@ def available_microphones() -> list[tuple[int, str]]:
 
 def start_recording() -> None:
     global recording, chunks
+    if busy.locked():
+        ui_events.put(("notice", "Finishing previous dictation"))
+        return
     del partials[:]
+    source = "command" if command_mode else "continuous" if continuous_mode else "dictation"
+    begin_recovery(current_profile(), source)
     if vad_enabled:
         vad_queue.put(("reset",))
         for b in preroll:  # give the VAD the moment just before the press
@@ -915,7 +964,7 @@ def start_recording() -> None:
     recording = True
     ui_events.put("continuous" if continuous_mode else "recording")
     beep(start=True)
-    print("â— Recording%s..." % (" (continuous)" if continuous_mode else ""))
+    print("Recording%s..." % (" (continuous)" if continuous_mode else ""))
 
 
 def stop_and_transcribe() -> None:
@@ -940,20 +989,25 @@ def stop_and_transcribe() -> None:
         else:
             if not chunks:
                 print("No audio captured.")
+                finish_recovery(success=True)
                 return
             audio = np.concatenate(chunks).flatten()
             if len(audio) < SAMPLE_RATE * 0.3:
                 print("Recording too short, ignored.")
+                finish_recovery(success=True)
                 return
             raw = " ".join(
                 filter(None, (ACTIVE_ENGINE.transcribe(p)
                               for p in split_audio(audio)))
             )
+        if raw and not partials:
+            journal_partial(raw)
         audio = np.concatenate(chunks).flatten() if chunks else np.zeros(0, dtype=np.float32)
         profile = current_profile()
         text = finish_text(raw, profile)
         if not text:
             print("Heard nothing intelligible.")
+            finish_recovery(success=True)
             return
         latency = time.time() - t0
         if command_mode:
@@ -961,8 +1015,9 @@ def stop_and_transcribe() -> None:
             if transformed is None:
                 print("Command not supported; selected text was left unchanged.")
                 ui_events.put(("notice", "Command not supported"))
+                finish_recovery(success=True)
                 return
-            deliver_text(
+            record = deliver_text(
                 transformed,
                 trailing_space=False,
                 original=text,
@@ -973,10 +1028,11 @@ def stop_and_transcribe() -> None:
                 profile=profile,
                 source="command",
             )
+            finish_recovery(success=record is not None)
             print("Command applied: %s" % text)
             return
-        print("â†’ (%.1fs wait) %s" % (latency, text))
-        deliver_text(
+        print("-> (%.1fs wait) %s" % (latency, text))
+        record = deliver_text(
             text,
             original=raw,
             audio=audio,
@@ -985,6 +1041,7 @@ def stop_and_transcribe() -> None:
             engine=getattr(ACTIVE_ENGINE, "name", ""),
             profile=profile,
         )
+        finish_recovery(success=record is not None)
     finally:
         command_mode = False
         command_selection = ""
@@ -1015,8 +1072,9 @@ def end_continuous() -> None:
             deadline = time.time() + 60
             while not seg_queue.empty() and time.time() < deadline:
                 time.sleep(0.1)
+        finish_recovery(success=not recovery_failed)
         ui_events.put("idle")
-        print("â–  Continuous mode off.")
+        print("Continuous mode off.")
 
 
 def toggle_continuous() -> None:
@@ -1031,7 +1089,7 @@ def toggle_continuous() -> None:
     if recording:
         # already dictating via Ctrl+Win: lock the mic open instead
         ui_events.put("continuous")
-        print("â— Continuous mode on (mic locked open).")
+        print("Continuous mode on (mic locked open).")
     else:
         start_recording()
 
@@ -1139,7 +1197,7 @@ def start_tray() -> None:
     }
 
     menu = pystray.Menu(
-        pystray.MenuItem("Hold or tap %s Â· %s = open mic"
+        pystray.MenuItem("Hold or tap %s | %s = open mic"
                          % (HOTKEY_LABEL, CONTINUOUS_LABEL),
                          None, enabled=False),
         pystray.Menu.SEPARATOR,
@@ -1173,8 +1231,8 @@ TEAL = "#1f7f93"
 # ---------------------------------------------------------------- overlay
 
 class Overlay:
-    """The floating bar. A paper-white pill with six thin ink curves â€” one
-    per octave of your voice â€” drawn like a precision instrument chart.
+    """The floating bar. A paper-white pill with six thin ink curves - one
+    per octave of your voice - drawn like a precision instrument chart.
     Stays visible after use and fades away after IDLE_FADE seconds. Drag to
     move; snaps to screen anchors; never steals keyboard focus."""
 
@@ -1211,7 +1269,7 @@ class Overlay:
         self.canvas.bind("<B1-Motion>", self._drag_move)
         self.canvas.bind("<ButtonRelease-1>", self._drag_end)
 
-        # static art, drawn ONCE â€” animation only moves coordinates
+        # static art, drawn ONCE - animation only moves coordinates
         def capsule(x0, y0, x1, y1, fill):
             cr = (y1 - y0) / 2
             self.canvas.create_oval(x0, y0, x0 + 2 * cr, y1, fill=fill, outline="")
@@ -1227,7 +1285,7 @@ class Overlay:
         for gx in range(26, self.W - 10, 11):
             self.canvas.create_line(gx, 4, gx, self.H - 4, fill=HAIRLINE)
         self.canvas.create_line(20, mid, self.W - 7, mid, fill=HAIRLINE)
-        # microphone glyph (state indicator) â€” crisp vector art in place of the
+        # microphone glyph (state indicator) - crisp vector art in place of the
         # old status dot. Recolours by state; drawn once, never rebuilt.
         cx, cy, _c = 11.0, mid, self.DOTS["idle"]
         # A compact badge, centered inside the 26px pill.
@@ -1503,7 +1561,7 @@ class Overlay:
 
 def main() -> None:
     global vad_enabled, ACTIVE_ENGINE
-    # Status prints use "â—"/"â†’". Under a redirected/piped stdout Windows
+    # Status prints must stay ASCII. Under a redirected/piped stdout Windows
     # picks cp1252 (strict), so those chars raise UnicodeEncodeError and silently
     # kill the recording/finish worker threads. Force UTF-8 with replacement so a
     # print can never take a thread (and the dictation) down.
@@ -1514,7 +1572,7 @@ def main() -> None:
             pass
     want_hub = "--hub" in sys.argv or OPEN_HUB
     if not ipc_server():
-        # another copy is already running â€” ask it to show its Hub instead
+        # another copy is already running - ask it to show its Hub instead
         ipc_send("hub")
         print("Already running; opened the Hub in the existing instance.")
         return
@@ -1533,7 +1591,7 @@ def main() -> None:
     audio_loader.start()
     ACTIVE_ENGINE = load_engine()
     print("Engine: %s" % ACTIVE_ENGINE.name)
-    # first inference pays a ~8s one-time warm-up cost â€” pay it now, at
+    # first inference pays a ~8s one-time warm-up cost - pay it now, at
     # startup, instead of on the user's first dictation
     ACTIVE_ENGINE.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))
     print("Engine warmed up.")
