@@ -3,7 +3,9 @@
 Validated 2026-07-13 against the public feature documentation for Wispr Flow,
 Aqua Voice, and Superwhisper. "Gap" means none of those three documents the
 complete behavior below. It is not a claim about every private or unpublished
-dictation tool.
+dictation tool. Several competitors now ship adjacent retry, history,
+reprocessing, or clipboard features; those are called out below instead of
+being presented as absent.
 
 ## Release Gate
 
@@ -28,9 +30,23 @@ input, or weakens offline operation.
 
 ## Evidence
 
-- Superwhisper's top feature board lists **Pause Recording** as reviewing with
-  substantial votes and **Re-process with different settings** as pending:
-  <https://feedback.superwhisper.com/board/features?cursor=1&limit=10&order=top>
+- Superwhisper's public board documents sustained demand for a true recording
+  pause that can resume the same session:
+  <https://feedback.superwhisper.com/board/p/pause-recording>
+- Superwhisper already supports processing a History item again with the
+  currently active mode. Flow State's gap is the complete Reprocess Lab
+  behavior: five outputs shown together without changing the original or live
+  settings:
+  <https://superwhisper.com/docs/get-started/transcribe-history>
+- Aqua keeps recent audio for three days and can rerun transcription. Flow
+  State's gap is the complete durable crash-journal, orphan-inbox, and guarded
+  recovery behavior rather than basic History replay:
+  <https://aquavoice.com/guide/history>
+- Wispr Flow now preserves audio for many failed transcriptions and supports
+  retry from History, but its own documentation says a force-quit or crash
+  during dictation cannot be recovered. Flow State journals completed speech
+  segments before that failure boundary:
+  <https://docs.wisprflow.ai/articles/2503460374-retry-failed-transcriptions>
 - Superwhisper users request a live transcript streamed into a file specifically
   for crash recovery:
   <https://feedback.superwhisper.com/board/p/live-transcript-into-a-text-file>
@@ -41,6 +57,13 @@ input, or weakens offline operation.
   <https://feedback.superwhisper.com/board/p/server-side-transcription-polish-chaining-for-hosted-batch>
 - Superwhisper users request an option that does not overwrite their clipboard:
   <https://feedback.superwhisper.com/board/p/allow-disable-save-to-clipboard>
+- Superwhisper supports restoring the clipboard on macOS but documents that it
+  is not supported on Windows. Wispr Flow likewise documents automatic restore
+  on Mac but not Windows. Flow State's Windows Clipboard Shield additionally
+  refuses to overwrite clipboard data changed after its paste:
+  <https://superwhisper.com/docs/get-started/windows>
+  and
+  <https://docs.wisprflow.ai/articles/7971211038-fix-text-not-pasting-after-dictation>
 - Aqua's launch discussion asks for proper undo/redo, cursor-correct insertion,
   pause/resume, and no interference after keyboard takeover:
   <https://news.ycombinator.com/item?id=39828686>
