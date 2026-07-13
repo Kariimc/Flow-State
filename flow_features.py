@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import statistics
 import tempfile
 import uuid
 import wave
@@ -260,6 +261,7 @@ class HistoryStore:
         final: str,
         duration: float = 0.0,
         latency: float = 0.0,
+        delivery_latency: float = 0.0,
         engine: str = "",
         profile: str = "default",
         audio: np.ndarray | None = None,
@@ -278,6 +280,7 @@ class HistoryStore:
             "final": final,
             "duration": round(float(duration), 3),
             "latency": round(float(latency), 3),
+            "delivery_latency": round(float(delivery_latency), 3),
             "engine": engine,
             "profile": profile,
             "audio_path": audio_path,
@@ -377,17 +380,39 @@ class HistoryStore:
         self.rewrite([])
         return len(records)
 
-    def stats(self) -> dict:
+    def stats(self, max_record: float = 0.0) -> dict:
         records = self.read()
         words = sum(int(r.get("words") or len(r.get("final", "").split())) for r in records)
         seconds = sum(float(r.get("duration") or 0) for r in records)
         latencies = [float(r.get("latency") or 0) for r in records if float(r.get("latency") or 0) > 0]
+        delivery_latencies = sorted(
+            float(r.get("delivery_latency") or 0)
+            for r in records
+            if float(r.get("delivery_latency") or 0) > 0
+        )
+        p95_index = max(0, int(np.ceil(len(delivery_latencies) * 0.95)) - 1)
+        cutoff_warnings = sum(
+            1 for r in records
+            if max_record > 0
+            and r.get("source", "dictation") == "dictation"
+            and float(r.get("duration") or 0) >= max_record
+        )
+        recovered_sessions = sum(
+            1 for r in records if r.get("source") == "recovery"
+        )
         profiles = Counter(r.get("profile", "default") for r in records)
         return {
             "dictations": len(records),
             "words": words,
             "minutes": round(seconds / 60.0, 1),
             "average_latency": round(sum(latencies) / len(latencies), 2) if latencies else 0.0,
+            "median_delivery_latency": round(statistics.median(delivery_latencies), 3)
+            if delivery_latencies else 0.0,
+            "p95_delivery_latency": round(delivery_latencies[p95_index], 3)
+            if delivery_latencies else 0.0,
+            "timed_deliveries": len(delivery_latencies),
+            "cutoff_warnings": cutoff_warnings,
+            "recovered_sessions": recovered_sessions,
             "top_profile": profiles.most_common(1)[0][0] if profiles else "default",
         }
 
@@ -405,6 +430,16 @@ class RecoveryJournal:
         if not self.SESSION_ID.fullmatch(str(session_id)):
             return None
         candidate = (self.directory / f"{session_id}.jsonl").resolve()
+        try:
+            candidate.relative_to(self.directory.resolve())
+        except ValueError:
+            return None
+        return candidate
+
+    def _audio_path(self, session_id: str) -> Path | None:
+        if not self.SESSION_ID.fullmatch(str(session_id)):
+            return None
+        candidate = (self.directory / f"{session_id}.wav").resolve()
         try:
             candidate.relative_to(self.directory.resolve())
         except ValueError:
@@ -444,11 +479,40 @@ class RecoveryJournal:
         })
         return True
 
+    def attach_audio(
+        self,
+        session_id: str,
+        audio: np.ndarray,
+        sample_rate: int = 16000,
+    ) -> str:
+        journal_path = self._path(session_id)
+        audio_path = self._audio_path(session_id)
+        samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if journal_path is None or audio_path is None or not journal_path.exists() or not len(samples):
+            return ""
+        self.directory.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f"{session_id}-", suffix=".wav.tmp", dir=self.directory,
+        )
+        os.close(fd)
+        try:
+            write_wav(temp_name, samples, sample_rate)
+            with open(temp_name, "rb+") as source:
+                os.fsync(source.fileno())
+            os.replace(temp_name, audio_path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
+        return str(audio_path)
+
     def complete(self, session_id: str) -> bool:
         path = self._path(session_id)
         if path is None or not path.exists():
             return False
         path.unlink()
+        audio_path = self._audio_path(session_id)
+        if audio_path and audio_path.exists():
+            audio_path.unlink()
         return True
 
     def orphans(self) -> list[dict]:
@@ -484,5 +548,94 @@ class RecoveryJournal:
                 "source": start.get("source", "dictation"),
                 "text": " ".join(pieces),
                 "segments": len(pieces),
+                "audio_path": str(audio_path)
+                if (audio_path := self._audio_path(path.stem)) and audio_path.exists()
+                else "",
             })
         return sessions
+
+
+class DeliveryQueue:
+    """Durable text that could not be inserted into its intended app."""
+
+    RECORD_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$")
+
+    def __init__(self, root: str | os.PathLike):
+        self.root = Path(root).resolve()
+        self.path = self.root / "delivery-queue.jsonl"
+
+    def add(
+        self,
+        text: str,
+        *,
+        target: dict | None = None,
+        profile: str = "default",
+        source: str = "dictation",
+        reason: str = "delivery failed",
+    ) -> dict:
+        cleaned = str(text).strip()
+        if not cleaned:
+            raise ValueError("Queued delivery text cannot be empty")
+        now = datetime.now()
+        record = {
+            "id": now.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8],
+            "timestamp": now.isoformat(timespec="seconds"),
+            "text": cleaned,
+            "target": {
+                "process": str((target or {}).get("process", "")),
+                "title": str((target or {}).get("title", "")),
+                "hwnd": int((target or {}).get("hwnd", 0) or 0),
+            },
+            "profile": str(profile or "default"),
+            "source": str(source or "dictation"),
+            "reason": str(reason or "delivery failed"),
+        }
+        self.root.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "a", encoding="utf-8") as out:
+            out.write(json.dumps(record, ensure_ascii=False) + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+        return record
+
+    def read(self) -> list[dict]:
+        records = []
+        try:
+            with open(self.path, encoding="utf-8") as source:
+                for line in source:
+                    try:
+                        record = json.loads(line)
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        isinstance(record, dict)
+                        and self.RECORD_ID.fullmatch(str(record.get("id", "")))
+                        and record.get("text")
+                    ):
+                        records.append(record)
+        except OSError:
+            pass
+        records.reverse()
+        return records
+
+    def _rewrite(self, records: list[dict]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix="delivery-", suffix=".tmp", dir=self.root)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                for record in reversed(records):
+                    out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(temp_name, self.path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
+
+    def complete(self, record_id: str) -> bool:
+        if not self.RECORD_ID.fullmatch(str(record_id)):
+            return False
+        records = self.read()
+        if not any(record.get("id") == record_id for record in records):
+            return False
+        self._rewrite([record for record in records if record.get("id") != record_id])
+        return True

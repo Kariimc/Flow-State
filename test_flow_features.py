@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from flow_features import (
+    DeliveryQueue,
     HistoryStore,
     RecoveryJournal,
     apply_vocabulary,
@@ -88,6 +89,28 @@ class AudioFeatureTests(unittest.TestCase):
 
 
 class HistoryStoreTests(unittest.TestCase):
+    def test_reliability_stats_report_delivery_percentiles_and_cutoffs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(temp)
+            for index, latency in enumerate((0.2, 0.4, 0.8, 1.6)):
+                store.add(
+                    original="test",
+                    final="Test",
+                    duration=45 if index == 3 else 3,
+                    delivery_latency=latency,
+                    source="dictation",
+                )
+            store.add(
+                original="recovered",
+                final="Recovered",
+                source="recovery",
+            )
+            stats = store.stats(max_record=45)
+            self.assertEqual(stats["median_delivery_latency"], 0.6)
+            self.assertEqual(stats["p95_delivery_latency"], 1.6)
+            self.assertEqual(stats["cutoff_warnings"], 1)
+            self.assertEqual(stats["recovered_sessions"], 1)
+
     def test_history_round_trip_with_audio_and_stats(self):
         with tempfile.TemporaryDirectory() as temp:
             store = HistoryStore(temp)
@@ -154,8 +177,24 @@ class RecoveryJournalTests(unittest.TestCase):
                     "source": "dictation",
                     "text": "First recovered segment second segment",
                     "segments": 2,
+                    "audio_path": "",
                 }],
             )
+
+    def test_attached_audio_is_listed_and_removed_with_owned_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            journal = RecoveryJournal(temp)
+            session_id = journal.begin(profile="notes")
+            audio_path = journal.attach_audio(
+                session_id,
+                np.zeros(1600, dtype=np.float32),
+                sample_rate=16000,
+            )
+
+            self.assertTrue(Path(audio_path).exists())
+            self.assertEqual(journal.orphans()[0]["audio_path"], audio_path)
+            self.assertTrue(journal.complete(session_id))
+            self.assertFalse(Path(audio_path).exists())
 
     def test_complete_removes_owned_journal(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -175,6 +214,32 @@ class RecoveryJournalTests(unittest.TestCase):
 
             self.assertFalse(journal.complete("../../outside"))
             self.assertTrue(outside.exists())
+
+
+class DeliveryQueueTests(unittest.TestCase):
+    def test_failed_delivery_round_trip_and_complete(self):
+        with tempfile.TemporaryDirectory() as temp:
+            queue = DeliveryQueue(temp)
+            record = queue.add(
+                "Protected text",
+                target={"process": "notepad.exe", "title": "Notes", "hwnd": 42},
+                profile="notes",
+                source="dictation",
+                reason="paste blocked",
+            )
+
+            self.assertEqual(queue.read(), [record])
+            self.assertEqual(record["target"]["process"], "notepad.exe")
+            self.assertTrue(queue.complete(record["id"]))
+            self.assertEqual(queue.read(), [])
+
+    def test_invalid_id_cannot_change_delivery_queue(self):
+        with tempfile.TemporaryDirectory() as temp:
+            queue = DeliveryQueue(temp)
+            record = queue.add("Keep me")
+
+            self.assertFalse(queue.complete("../../outside"))
+            self.assertEqual(queue.read(), [record])
 
 
 if __name__ == "__main__":
