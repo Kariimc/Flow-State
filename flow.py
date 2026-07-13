@@ -524,7 +524,7 @@ def make_icon() -> None:
     for color, cycles, amp, width, phase in (
         ("#1f7f93", 3.0, 26, 8, 1.2),
         ("#e8912a", 2.0, 40, 10, 2.6),
-        ("#c8371e", 1.2, 54, 12, 0.0),
+        ("#4a4a73", 1.2, 54, 12, 0.0),
     ):
         pts = []
         for i in range(0, 101, 2):
@@ -534,7 +534,7 @@ def make_icon() -> None:
         bd.line(pts, fill=color, width=width * scale, joint="curve")
     font = _icon_font(116 * scale)
     bd.text((29 * scale, 18 * scale), "F", fill=(38, 35, 29, 80), font=font)
-    bd.text((25 * scale, 14 * scale), "F", fill="#c8371e", font=font)
+    bd.text((25 * scale, 14 * scale), "F", fill="#4a4a73", font=font)
     img = downsample(big)
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((12, 12, 244, 244), radius=54, outline="#fdfbf6", width=2)
@@ -578,7 +578,7 @@ def make_icon() -> None:
     small_font = _icon_font(70 * scale)
     td.text((109 * scale, 49 * scale), "F", fill=(38, 35, 29, 80),
             font=small_font)
-    td.text((105 * scale, 45 * scale), "F", fill="#c8371e", font=small_font)
+    td.text((105 * scale, 45 * scale), "F", fill="#4a4a73", font=small_font)
     tray = downsample(tray_big)
     try:
         tray.save(TRAY_ICON_FILE, sizes=[(256, 256), (64, 64), (48, 48),
@@ -1223,7 +1223,7 @@ PAPER = "#f8f5ee"      # warm paper white
 PAPER_DIM = "#efeadd"
 HAIRLINE = "#e3dccb"
 RIM = "#b9b1a0"
-VERMILION = "#c8371e"
+VERMILION = "#4a4a73"
 AMBER = "#e8912a"
 TEAL = "#1f7f93"
 
@@ -1238,7 +1238,7 @@ class Overlay:
 
     W, H = 190, 26
     POLL_MS = 20
-    CURVE_COLORS = ["#c8371e", "#e8912a", "#1f7f93",
+    CURVE_COLORS = ["#4a4a73", "#e8912a", "#1f7f93",
                     "#d9a53f", "#a32c14", "#4d9fb0"]
     CURVE_WIDTHS = [1.7, 1.3, 1.3, 1.1, 1.0, 1.0]
     CURVE_CYCLES = [1.3, 2.1, 3.2, 4.4, 5.7, 7.2]   # higher octave = more waves

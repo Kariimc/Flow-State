@@ -1,7 +1,7 @@
 # Flow State - Progress
 
-**Updated:** 2026-07-11
-**Last verified:** full desktop-context discovery ran 31 tests OK in 33.464s; 7 Python files compiled to an isolated cache; Recovery Inbox was visually checked in the native dark-mode Hub; its history-save guard proved red when removed and green restored; `git diff --check` passed.
+**Updated:** 2026-07-13
+**Last verified:** after an accidental laptop restart, the live branch remained synchronized with origin at Claude's `721747b` silent-launch commit and every isolated reliability artifact remained on disk. The approved muted-indigo palette was applied narrowly to the live Hub, waveform, and generated icons. All 31 live tests passed in 19.492s, `flow.py` and `flow_hub.py` compiled, `git diff --check` passed, and the actual dark-mode Hub was visually verified with the `#aaa7d4` accent and grand Bodoni F. The isolated ten-feature build also re-passed all 96 tests, including 14 native Tk page/button tests, in 257.668s and 8 files compiled.
 
 ## Where We Are
 
@@ -13,8 +13,8 @@ continuous mode, tray icon, floating waveform pill, local history, dictionary,
 vocabulary casing, selected-text commands, WAV file transcription, profiles,
 polish cleanup, and a modern Hub options screen.
 
-The Hub now has a paper/graph-paper layout, dark mode, a heavy red F brand,
-red toggle knobs on neutral tracks, sidebar icon nav, and pages for History,
+The Hub now has a paper/graph-paper layout, dark mode, a grand Bodoni F in the
+muted-indigo brand color, matching toggle knobs on neutral tracks, sidebar icon nav, and pages for History,
 Recovery, Dictionary, General, Dictation, Audio & mic, Appearance, Privacy, Files &
 meetings, and Statistics. Header/title clipping was fixed by reducing the
 Georgia header sizes and increasing header height.
@@ -47,9 +47,10 @@ before differentiator #2 is complete.
 
 ## Do Next
 
-Finish #2 Recovery Inbox by attaching stopped-session audio to its contained
-journal and retrying transcription when that audio exists. Retry the live
-Notepad stop-to-insert measurement when desktop process launch is available.
+Apply the isolated ten-feature reliability build from the Codex workspace while
+preserving Claude's `run.bat` and `run.vbs`, then rerun all 96 tests and the
+guarded native Notepad probe. Moonshine Base remains the default: official Tiny
+was faster but materially less accurate on the complete reference clips.
 
 ## Don't Forget
 
@@ -97,3 +98,5 @@ Notepad stop-to-insert measurement when desktop process launch is available.
 - 2026-07-11 - Fsynced recognized segments into a contained Crash Journal because long dictations must survive process interruption; journals are deleted only after final history persistence succeeds.
 - 2026-07-11 - Replaced corrupted console glyphs with ASCII because `start_recording()` raised `UnicodeEncodeError` before stdout reconfiguration in direct/test invocation.
 - 2026-07-12 - Kept Recovery Inbox journals until both redelivery and History save succeed because inserted text without durable History must remain recoverable.
+- 2026-07-13 - Applied the approved `#4a4a73` light / `#aaa7d4` dark palette to the real Hub, waveform, and generated icons after the restart exposed that the change had only existed in prototypes; the live dark-mode Hub was visually verified.
+- 2026-07-13 - Kept Moonshine Base as default after official Tiny cut median recognition from 145.6 ms to 81.3 ms but was word-exact on only 2/5 complete clips versus Base's 5/5.
