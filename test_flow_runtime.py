@@ -257,6 +257,20 @@ class DeliveryTests(unittest.TestCase):
     def test_overlay_event_poll_ceiling_is_25ms(self):
         self.assertLessEqual(flow.Overlay.POLL_MS, 25)
 
+    def test_overlay_partial_text_fits_one_measured_line(self):
+        overlay = flow.Overlay.__new__(flow.Overlay)
+        overlay.partial_font = mock.Mock()
+        overlay.partial_font.measure.side_effect = lambda value: len(value) * 8
+        overlay.partial_max_width = 80
+
+        fitted = overlay._fit_partial_text(
+            "Flow State keeps every word safe and ready."
+        )
+
+        self.assertTrue(fitted.startswith("..."))
+        self.assertLessEqual(overlay.partial_font.measure(fitted), 80)
+        self.assertNotIn("\n", fitted)
+
     def test_delivery_precedes_history_and_survives_history_failure(self):
         calls = []
 

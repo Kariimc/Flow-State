@@ -23,7 +23,7 @@ import winsound
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, font as tkfont, messagebox
 
 import keyboard
 import numpy as np
@@ -1889,9 +1889,13 @@ class Overlay:
             25, 4, self.W - 5, self.H - 4, fill=PAPER, outline="",
             state="hidden",
         )
+        self.partial_font = tkfont.Font(
+            root=self.root, family="Segoe UI", size=8,
+        )
+        self.partial_max_width = self.W - 42
         self.partial_text = self.canvas.create_text(
-            31, mid, text="", anchor="w", width=self.W - 42,
-            fill="#6f685c", font=("Segoe UI", 8), state="hidden",
+            31, mid, text="", anchor="w", fill="#6f685c",
+            font=self.partial_font, state="hidden",
         )
         # never steal focus from the window being dictated into
         self.root.update_idletasks()
@@ -2067,11 +2071,18 @@ class Overlay:
 
     # ---- event pump
 
-    def _show_partial(self, text: str, duration: int = 1800):
+    def _fit_partial_text(self, text: str) -> str:
         one_line = " ".join(text.split())
-        if len(one_line) > 42:
-            one_line = "..." + one_line[-39:]
-        self.canvas.itemconfigure(self.partial_text, text=one_line, state="normal")
+        if self.partial_font.measure(one_line) <= self.partial_max_width:
+            return one_line
+        suffix = one_line
+        while suffix and self.partial_font.measure("..." + suffix) > self.partial_max_width:
+            suffix = suffix[1:]
+        return "..." + suffix
+
+    def _show_partial(self, text: str, duration: int = 1800):
+        fitted = self._fit_partial_text(text)
+        self.canvas.itemconfigure(self.partial_text, text=fitted, state="normal")
         self.canvas.itemconfigure(self.partial_bg, state="normal")
         self.canvas.tag_raise(self.partial_bg)
         self.canvas.tag_raise(self.partial_text)
