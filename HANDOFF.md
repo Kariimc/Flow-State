@@ -6,10 +6,11 @@ window. No audio leaves the machine. The app uses three production modules:
 `flow.py` for capture/delivery, `flow_features.py` for durable data and text
 features, and `flow_hub.py` for the standard-library Tk UI.
 
-Status: the reliability bundle and waveform text fix are merged to `main`.
-The exact merged tree passed 97 tests, including 14 native Tk tests, and all
-eight Python/test/benchmark files compiled. `PROGRESS.md` records the current
-commit, live-process check, measurements, and any next action.
+Status: the Accuracy Learning release candidate is complete on
+feat/accuracy-learning and approved to land on main. It passed 120 tests,
+including 19 native Tk tests, plus the native standard Edit/RichEdit and password
+exclusion checks. PROGRESS.md records the exact behavior and remaining release
+steps; update this status with the merge commit and live PID after landing.
 
 ---
 
@@ -35,7 +36,7 @@ Use it: hold or tap **Ctrl+Win**, speak, release. Text appears at your cursor.
 - **Esc twice** quickly = quit.
 
 The desktop shortcut opens the **Hub**. Its navigation is History, Recovery,
-Delivery queue, Dictionary, General, Dictation, Audio & mic, Appearance,
+Delivery queue, Dictionary, Accuracy, General, Dictation, Audio & mic, Appearance,
 Privacy, Files & meetings, and Statistics. The app also lives in the system
 tray and can start with Windows when the Hub's autostart setting is enabled.
 
@@ -103,6 +104,7 @@ before the user's first dictation.
 - **transcriber_worker thread**: runs the ASR engine on finished utterances.
 - **pystray thread**: system tray icon (`run_detached`).
 - **keyboard hooks**: global hotkeys (the `keyboard` library).
+- **correction watcher threads**: bounded read-only checks of one standard Windows edit control after insertion.
 - **IPC thread**: single-instance socket server (see §6).
 
 `busy` (a Lock) serializes the finish/stop paths so a key-release and a
@@ -115,7 +117,8 @@ VAD-auto-stop can't both transcribe the same recording.
 | ASR engines (Moonshine default, Whisper fallback) | `MoonshineEngine`, `WhisperEngine`, `load_engine` |
 | Rule cleanup, profiles, corrections, vocabulary | `flow_features.py`, `finish_text` |
 | Personal dictionary (live-reload replacements) | `Dictionary`, `read_rules`, `write_rules` |
-| History, recordings, recovery, delivery queue | `HistoryStore`, `RecoveryJournal`, `DeliveryQueue` |
+| Reviewed correction memory and bounded edit watching | `CorrectionStore`, `extract_correction_pairs`, `watch_inserted_correction` |
+| History, corrected labels, recordings, recovery, delivery queue | `HistoryStore`, `RecoveryJournal`, `DeliveryQueue` |
 | Incremental pipeline | `audio_callback`, `vad_worker`, `transcriber_worker` |
 | Long-audio fallback split | `split_audio` |
 | Hold / tap / continuous / pause logic | `on_key_down/up`, `toggle_continuous`, `toggle_pause` |
@@ -133,7 +136,7 @@ VAD-auto-stop can't both transcribe the same recording.
 Defaults live in the config block at the top of `flow.py`. `settings.json`
 (written by the Hub settings pages) overrides them through `load_settings()`.
 `TWEAKABLE` covers the six shortcuts, engine/injection, cleanup/profile,
-microphone and cues, audio/history retention, theme, and startup Hub behavior.
+microphone and cues, audio/history retention, correction approval mode, theme, and startup Hub behavior.
 The Hub marks changes that need a restart; use-time values apply immediately.
 
 ---
@@ -197,7 +200,7 @@ from that microphone artwork.
 ## 7. Testing approach
 
 The formal suite is `test_flow_features.py`, `test_flow_hub.py`, and
-`test_flow_runtime.py`. Run all 97 tests in one process from the repository root:
+`test_flow_runtime.py`. Run all 120 tests in one process from the repository root:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest -v
@@ -222,10 +225,10 @@ Runtime/UI changes also need the focused real checks below:
 
 ## 8. Roadmap (what's next)
 
-The approved Hub roadmap and all ten reliability differentiators are shipped.
-That includes profiles, file transcription, statistics, crash recovery,
-guarded delivery, pause/resume, reprocessing, scoped undo/redo, and the local
-Reliability dashboard. No item from that bundle remains agent-actionable.
+The approved Hub roadmap, ten reliability differentiators, and Accuracy
+Learning are shipped. Accuracy observations remain pending until explicit
+approval. Candidate-engine comparison is the next evidence step, but it stays
+blocked until History contains 12 corrected entries with saved audio.
 
 Future ideas require a new decision rather than silent implementation:
 

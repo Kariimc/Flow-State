@@ -17,8 +17,8 @@ once. After that, use `run.bat` or the Desktop shortcut.
 
 Flow State can start with Windows when **Start with Windows** is enabled in the
 Hub. The **Flow State** Desktop icon opens History, Recovery, Delivery queue,
-Dictionary, shortcuts, dictation behavior, audio, appearance, privacy, file
-transcription, and statistics.
+Dictionary, Accuracy, shortcuts, dictation behavior, audio, appearance, privacy,
+file transcription, and statistics.
 
 1. Double-click `run.bat`, or open the Desktop shortcut.
 2. Wait until Flow State says **Ready**.
@@ -85,6 +85,27 @@ changes apply on the next dictation.
 Open `vocabulary.txt` to save product names, people, and acronyms whose
 capitalization should be restored automatically.
 
+## Accuracy And Learning
+
+Open **Accuracy** to review correction pairs Flow State has noticed. Approved
+pairs are applied on the next dictation; pending and rejected pairs never change
+text. Whisper also receives approved replacement terms as recognition hints.
+Moonshine does not support those hints, so it uses the same approved pairs after
+recognition instead.
+
+For apps that expose a standard Windows Edit or RichEdit field, Flow State
+watches only the exact field and character range it just used. The watcher is
+read-only, stops after 12 seconds or as soon as focus changes, and saves small
+replacements for review. Unsupported apps are skipped without touching them.
+
+Every History item also has a **Corrected label** field. Saving it preserves the
+original and delivered transcript, adds any changed phrase to review, and gives
+the Personal Accuracy Lab ground truth for later engine comparisons. Flow State
+will not rank or download candidate engines until at least 12 corrected saved
+audio recordings exist. Correction memory stays local in `data/corrections.json`. Privacy includes a
+separate confirmed action to remove every learned correction without changing
+History.
+
 ## Settings
 
 Open the Flow State Hub from the Desktop icon or tray menu. The Options screen
@@ -103,6 +124,9 @@ lets you change:
 - `INJECTION` - `"paste"` for speed or `"type"` for apps that block paste.
 - `POLISH`, `VERBATIM`, and `PROFILE` - cleanup and writing behavior.
 - `MICROPHONE`, `SOUND_CUES`, `SAVE_AUDIO`, `HISTORY_DAYS`, and `THEME`.
+- `CORRECTION_MODE` - review every detected edit, wait until a pair repeats
+  twice before showing it for review, or use only corrections saved manually
+  from History. Automatic observations are never approved without you.
 
 The tray also offers scoped Undo and Redo for the latest Flow State insertion.
 They are available only while the same target window is active and no later
@@ -130,7 +154,7 @@ capture is available when Windows exposes a Stereo Mix input device.
 
 ## Performance Check
 
-The current `main` suite contains 97 tests, including 14 native Tk page/button
+The current `main` suite contains 120 tests, including 19 native Tk page/button
 tests. Run it in one process before and after a code change:
 
 ```powershell
