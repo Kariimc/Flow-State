@@ -8,10 +8,10 @@ features, and `flow_hub.py` for the standard-library Tk UI.
 
 Status: Accuracy Learning is merged and pushed to main at 3a80d55. The exact
 merged tree passed all 120 tests in 89.931s, including 19 native Tk tests, and
-all eight Python/test/benchmark files compile. The pre-merge resident Flow State
-process is still PID 12844; its exact-PID stop was denied by the external
-approval layer, so the new main build is on disk but the live process still
-needs a permitted restart. PROGRESS.md records the feature boundaries and next
+all eight Python/test/benchmark files compile. The old PID 12844 closed through
+Flow State's own IPC quit command, and the merged build is now resident as PID
+23372. A separate IPC hub request returned True, confirming the running
+single-instance server. PROGRESS.md records the feature boundaries and next
 evidence step.
 
 ---

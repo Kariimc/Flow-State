@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-14
-**Last verified:** Accuracy Learning is merged and pushed to main at 3a80d55. The exact merged tree passed all 120 tests in 89.931s, including 19 native Tk Hub tests, and all eight Python/test/benchmark files compile. Focused native checks proved 64-bit standard Edit/RichEdit reads, password-control exclusion, bounded correction watching, supported 800x560 and 940x680 Hub geometry, and clean Tk callback teardown. Independent general, Python, and security reviews were resolved before merge. The pre-merge resident Flow State process is still PID 12844 because the external approval layer denied its exact-PID stop; the new build is on disk but is not yet the resident process.
+**Last verified:** Accuracy Learning is merged and pushed to main at 3a80d55, with exact-state docs at d425e3e. The exact merged tree passed all 120 tests in 89.931s, including 19 native Tk Hub tests, and all eight Python/test/benchmark files compile. Focused native checks proved 64-bit standard Edit/RichEdit reads, password-control exclusion, bounded correction watching, supported 800x560 and 940x680 Hub geometry, and clean Tk callback teardown. Independent general, Python, and security reviews were resolved before merge. Old PID 12844 closed through Flow State IPC, the merged build is resident as PID 23372, and a separate IPC hub request returned True.
 **Documentation audit:** README and HANDOFF now describe the shipped local correction memory, explicit approval modes, corrected History labels, private 12-record benchmark gate, and the standard-control watcher boundary. No candidate engine has been downloaded or ranked.
 
 ## Where We Are
@@ -134,11 +134,9 @@ learned corrections independently of History.
 
 ## Do Next
 
-When process approval is available, stop only verified Flow State PID 12844,
-restart flow.py --hub from main, and confirm a second --hub launch reaches the
-resident IPC server. Then collect corrected labels for 12 History entries that
-have saved audio. Only after those labels exist should the private engine
-benchmark download or rank any candidate.
+Collect corrected labels for 12 History entries that have saved audio. Only
+after those labels exist should the private engine benchmark download or rank
+any candidate.
 
 ## Don't Forget
 
