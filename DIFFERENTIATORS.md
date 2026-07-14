@@ -7,6 +7,8 @@ dictation tool. Several competitors now ship adjacent retry, history,
 reprocessing, or clipboard features; those are called out below instead of
 being presented as absent.
 
+All ten items below are shipped on `main` in the reliability merge `f13ab0a`.
+
 ## Release Gate
 
 Reliability, speed, and accuracy remain release gates. A feature does not ship
@@ -138,10 +140,11 @@ each of them.
 | 9 | Post-stop key generation hold test plus ordinary-key 0.002661 ms p95 and hotkey-branch 0.029984 ms p95. |
 | 10 | Exact paste-time, nearest-rank median/p95, completed recovery, cutoff tests, plus responsive light/dark loading and ready-state prototypes. |
 
-The complete 96-test suite passes in one process, including all 14 native Tk
+The complete 97-test suite passes in one process, including all 14 native Tk
 page/button tests. Eight Python, test, and benchmark files compile. Real
 Notepad verification proved exact insertion and isolated Windows delivery at
 24.7 ms median / 57.9 ms max. Official Tiny testing cut recognition latency but
 was word-exact on only 2/5 complete clips versus Base's 5/5, so Base remains the
-quality-safe default. Unconditional competitor-speed claims remain gated on an
-apples-to-apples competitor run rather than a vendor marketing number.
+quality-safe default. A later no-install comparison measured only competitors'
+browser tools; it is not a desktop-app speed ranking. Unconditional competitor
+speed claims remain gated on an apples-to-apples same-machine desktop run.

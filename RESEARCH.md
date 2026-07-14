@@ -5,6 +5,10 @@ architecture, open-source landscape, hardware feasibility) plus community
 feedback mining. Source links inline; items marked (unverified) could not be
 confirmed against primary sources.*
 
+This is the original research snapshot, not a live competitor tracker. Current
+implementation status and later validation live in `DIFFERENTIATORS.md` and
+`PROGRESS.md`.
+
 ## 1. How Wispr Flow actually works
 
 **Interaction model.** Hold a key to dictate (Windows default `Ctrl+Win`),
@@ -100,12 +104,15 @@ with the ASR for the same 2 cores). The plan that keeps the door open:
 - Engine abstraction (`MoonshineEngine` / `WhisperEngine`) means new ASR
   models (Parakeet, Canary, multilingual Moonshine) are drop-in.
 
-## 6. Feature roadmap for our app
+## 6. Feature roadmap outcome
 
-| Status | Feature |
-|---|---|
-| ✅ done | Local ASR (Moonshine default, Whisper fallback), hold + toggle hotkey, recording/transcribing overlay, beeps, clipboard-paste with restore (+type fallback), filler removal, spoken punctuation, verbatim mode, 0.5 s pre-roll, history.txt |
-| ✅ done | Custom dictionary / text replacements (dictionary.txt, live reload) |
-| ✅ done | System tray icon (state colors, menu), Silero VAD auto-stop in tap mode |
-| next | Settings without editing flow.py, per-app profiles (casual/formal by active window) |
-| later | Local LLM cleanup ("deep clean" mode), streaming preview, voice commands |
+The approved roadmap is now shipped on `main`: the full Hub settings workspace,
+per-app profiles, selected-text commands, file transcription, local statistics,
+and the ten guarded reliability features in `DIFFERENTIATORS.md`. Durable JSONL
+history, saved audio, Recovery Inbox, and Delivery queue now supersede the
+original `history.txt`-only design described in this research snapshot.
+
+Future candidates need a new product decision: optional local-LLM deep clean,
+true word-level streaming preview, and installer packaging. The earlier idea of
+adding voice commands is complete; selected-text commands and scoped spoken
+undo/redo are already in the app.

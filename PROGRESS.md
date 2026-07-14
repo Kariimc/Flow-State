@@ -2,6 +2,7 @@
 
 **Updated:** 2026-07-14
 **Last verified:** Kariim gave fresh merge approval and the complete reliability branch plus the waveform text correction landed on `main` at merge commit `f13ab0a`. The waveform fix is commit `ed685f5`: status text no longer uses Tk's wrapping width, and is trimmed by the real Segoe UI pixel width so it stays on one line inside the 26px pill. Its bite test failed before the method existed, then the exact merged tree passed all 97 tests in 47.347s and all 8 Python/benchmark files compiled. A native Tk render measured the status text at `(30, 7, 176, 20)` inside its background `(24, 3, 186, 23)`. The laptop checkout is on `main`; its `flow.py` SHA-256 matches the tested merge (`4010552386AE46DAEEF81B807A709A9CFB719BA614ED188698E11BF5F7AC46FB`). Flow State was restarted from that checkout as PID `12844`; a second `--hub` launch reached the resident IPC server and returned `Already running; opened the Hub in the existing instance.` The no-install browser comparison measured Flow State's earlier 293.7ms native Notepad result against Wispr's 991ms browser-demo median and Superwhisper's 2601ms browser-tool median; this is browser-only evidence and is not a desktop-app superiority claim. Aqua was excluded because its web sandbox requires a held Space key that the available browser control could not reproduce fairly. Windows Microphone Array was restored as default and temporary Stereo Mix was disabled after testing.
+**Documentation audit:** The `docs/current-state-audit` review branch reconciles the user guide, engineering handoff, migration guide, research status, differentiator evidence, and completed wargames with the shipped app. Runtime code and user data are unchanged. The branch passed all 97 tests in 37.301s, compiled all 8 Python/test/benchmark files, and has no broken local Markdown file references.
 
 ## Where We Are
 
@@ -41,23 +42,21 @@ times and a persistent failure is visible. The caller path measures 0.0043 ms
 median/0.0065 ms p95 across 500 mocked-OS rounds; the actual restore still waits
 1.2 seconds in the background so slow target apps can consume the paste safely.
 
-Live VAD segments are capped at 3.5 seconds and Moonshine uses the measured
-four-thread sweet spot on this 12-thread machine, so long speech is transcribed
-while the user is still talking. This bounds the final stop-time work and
-produced a 185.2 ms median / 390.6 ms p95 / 453.1 ms max across 50 real-audio
-runs. A guarded real-Notepad check then proved exact insertion and isolated the
-Windows delivery stage at 24.7 ms median / 57.9 ms max, while Base recognition
-rose to 973.3 ms median under concurrent desktop load. Keep the competitor-speed
-claim gated until Tiny-versus-Base testing resolves that load sensitivity.
+The completed performance work is merged on `main`. Live VAD segments are
+capped at 3.5 seconds and Moonshine uses the measured four-thread sweet spot on
+this 12-thread machine. The final stop-time benchmark produced 185.2 ms median /
+390.6 ms p95 / 453.1 ms max across 50 real-audio runs. A guarded Notepad check
+proved exact insertion and isolated Windows delivery at 24.7 ms median / 57.9 ms
+max. Tiny recognized only 2/5 complete clips exactly versus Base's 5/5, so Base
+remains the quality-safe default. The no-install competitor measurements are
+browser-only and must not be presented as a desktop-app ranking.
 
-Performance work is active on branch `perf/reliability-baseline`. The first
-slice inserts completed text before saving WAV/history data, so disk latency or
-an ordinary history-write error cannot prevent the transcript from appearing.
-The old implementation failed the new regression test; the fixed path passes.
-The overlay now checks cross-thread state every 20 ms instead of 100 ms, and
-audio initialization is lazy and overlaps model loading. The startup benchmark
-raw samples were old 10048.0/4232.6/4413.4 ms and new
-3476.3/3416.2/3046.1 ms; medians are used because the first old run was cold.
+The merged delivery path inserts completed text before saving WAV/history data,
+so ordinary persistence latency or failure cannot suppress the transcript. The
+overlay checks cross-thread state every 20 ms, and lazy audio initialization
+overlaps model loading. Startup benchmark samples improved from
+10048.0/4232.6/4413.4 ms to 3476.3/3416.2/3046.1 ms; medians are used because
+the first old run was cold.
 
 `DIFFERENTIATORS.md` is the evidence-backed ten-feature contract. Feature #5,
 Clipboard Shield, is implemented: it restores the prior clipboard only when
@@ -77,30 +76,30 @@ keeps the recovery copy. Stopped-session audio is atomically fsynced beside the
 journal before transcription. Audio-backed rows retry transcription into
 History, then remove both recovery files only after that History save succeeds.
 
-Delivery Retry Queue is implemented in the isolated build. Insertion exceptions
+Delivery Retry Queue is shipped on `main`. Insertion exceptions
 fsync the exact text, intended process/window/title, profile, source, and failure
 reason while History saves independently. The Hub lists pending deliveries,
 copies/removes them, disables retry when the intended app is closed, and only
 focuses a validated original or same-process window before retry. If the queue
 write itself fails, Crash Journal remains instead of being falsely completed.
 
-Focus Lock is implemented in the isolated build. The foreground process/window
+Focus Lock is shipped on `main`. The foreground process/window
 is captured before the recording UI appears and compared again immediately before
 insertion. A process or document-title mismatch writes the exact text to Delivery
 Queue and saves History without calling the keyboard injection path.
 
-Typing Collision Guard is implemented in the isolated build. A global key-down
+Typing Collision Guard is shipped on `main`. A global key-down
 counter ignores active recording, snapshots when recording stops, and holds normal
 or command delivery when any newer keyboard input appears. Continuous dictation is
 excluded because it intentionally delivers while recording remains active.
 
-Pause and Resume is implemented in the isolated build. The pause shortcut flushes
+Pause and Resume is shipped on `main`. The pause shortcut flushes
 speech already captured, excludes all new callback audio, and resets VAD on resume
 without closing the recovery session. Live phrases skip per-piece History writes;
 stop waits for the final VAD segment, then saves one aggregate History item with an
 active duration that excludes paused time.
 
-Scoped Undo and Redo is implemented in the isolated build. Each successful Flow
+Scoped Undo and Redo is shipped on `main`. Each successful Flow
 State insertion remembers its exact payload, target window, and keyboard activity
 marker. Tray actions are enabled only while that same window is active and no later
 typing occurred; Redo restores the stored payload directly without retranscription.
@@ -109,20 +108,19 @@ from tray commands, configurable Ctrl+Win+Z / Ctrl+Win+Shift+Z hotkeys, and the
 voice command hotkey when no text is selected. Flow State's own synthetic keys
 are excluded from Typing Collision without ignoring real user takeover.
 
-Reprocess Lab is implemented in the isolated build and previewed beside the chat.
+Reprocess Lab is shipped on `main` and was visually reviewed before merge.
 History entries with saved audio open a five-output comparison for Verbatim, Light,
 Notes, Email, and Coding. It reuses the saved raw transcript, changes no global
 settings or History records, and each result can be copied independently. The
-reviewable prototype is `outputs/flow-state-reprocess-lab-preview.html`.
+review prototype was an external review artifact, not a runtime dependency.
 
-Local Reliability Dashboard is implemented and visually audited in the isolated build.
+Local Reliability Dashboard is shipped on `main` and was visually audited.
 New History records store a separate exact stop-to-insert value at the keyboard
 paste/type moment. Statistics calculates median and nearest-rank p95 only from
 those truthful samples, plus current held deliveries, completed recoveries, and
-hard-cap warnings from existing local stores. Its review prototype at
-`outputs/flow-state-reliability-dashboard-preview.html` passed light/dark,
-narrow/full-width, state-recovery, zero-overflow, and clean-console checks. Its
-generic loader was replaced with a dashboard-shaped local-record skeleton.
+hard-cap warnings from existing local stores. The external review prototype
+passed light/dark, narrow/full-width, state-recovery, zero-overflow, and
+clean-console checks; it is not required by the shipped native page.
 
 ## Do Next
 
@@ -207,3 +205,4 @@ the completed no-install comparison must stay labeled as browser-only evidence.
 - 2026-07-13 - Integrated the exact verified eleven-file reliability bundle without rewriting it. Protected launcher and user-data hashes stayed identical; candidate and live 96-test suites passed; the integrated Hub reached Ready; and guarded Notepad insertion was exact.
 - 2026-07-13 - Revalidated the ten differentiators against current official competitor documentation. Wispr, Aqua, and Superwhisper now ship adjacent retry, recent-audio rerun, reprocess, and clipboard features, so the evidence names that overlap and scopes each gap to Flow State's complete guarded behavior. None of the three competitor apps is installed locally; an honest responsiveness ranking still requires a same-machine competitor run rather than vendor WPM claims.
 - 2026-07-14 - Merged the complete reliability branch to `main` only after Kariim's fresh approval. Replaced character-count overlay truncation with measured Segoe UI pixel fitting and removed Tk wrapping; the exact merge passed 97 tests, compile, and native Tk bounds verification.
+- 2026-07-14 - Audited every tracked project document against the merged modules, Hub navigation, icons, feature status, and 97-test suite. Replaced active-branch and isolated-build wording with shipped state, labeled research/wargames as historical artifacts, corrected migration/runtime-data guidance, and verified every local Markdown file reference.
