@@ -6,11 +6,13 @@ window. No audio leaves the machine. The app uses three production modules:
 `flow.py` for capture/delivery, `flow_features.py` for durable data and text
 features, and `flow_hub.py` for the standard-library Tk UI.
 
-Status: the Accuracy Learning release candidate is complete on
-feat/accuracy-learning and approved to land on main. It passed 120 tests,
-including 19 native Tk tests, plus the native standard Edit/RichEdit and password
-exclusion checks. PROGRESS.md records the exact behavior and remaining release
-steps; update this status with the merge commit and live PID after landing.
+Status: Accuracy Learning is merged and pushed to main at 3a80d55. The exact
+merged tree passed all 120 tests in 89.931s, including 19 native Tk tests, and
+all eight Python/test/benchmark files compile. The pre-merge resident Flow State
+process is still PID 12844; its exact-PID stop was denied by the external
+approval layer, so the new main build is on disk but the live process still
+needs a permitted restart. PROGRESS.md records the feature boundaries and next
+evidence step.
 
 ---
 

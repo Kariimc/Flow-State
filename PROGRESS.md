@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-14
-**Last verified:** The approved Accuracy Learning release candidate on feat/accuracy-learning passed all 120 tests in 86.838s, including 19 native Tk Hub tests. Focused native checks proved 64-bit standard Edit/RichEdit reads, password-control exclusion, bounded correction watching, supported 800x560 and 940x680 Hub geometry, and clean Tk callback teardown. Independent general, Python, and security reviews were resolved before this run: Unicode case variants cannot crash approved corrections, repeat mode does not announce hidden first observations, oversized observations are ignored safely, History and Delivery Queue writes are serialized, malformed stores are preserved, and pending corrections never change text.
+**Last verified:** Accuracy Learning is merged and pushed to main at 3a80d55. The exact merged tree passed all 120 tests in 89.931s, including 19 native Tk Hub tests, and all eight Python/test/benchmark files compile. Focused native checks proved 64-bit standard Edit/RichEdit reads, password-control exclusion, bounded correction watching, supported 800x560 and 940x680 Hub geometry, and clean Tk callback teardown. Independent general, Python, and security reviews were resolved before merge. The pre-merge resident Flow State process is still PID 12844 because the external approval layer denied its exact-PID stop; the new build is on disk but is not yet the resident process.
 **Documentation audit:** README and HANDOFF now describe the shipped local correction memory, explicit approval modes, corrected History labels, private 12-record benchmark gate, and the standard-control watcher boundary. No candidate engine has been downloaded or ranked.
 
 ## Where We Are
@@ -134,12 +134,11 @@ learned corrections independently of History.
 
 ## Do Next
 
-Collect corrected labels for 12 History entries that have saved audio. Only
-then run the private engine benchmark and compare measured accuracy and speed.
-Do not download a candidate model or name a winner before that evidence exists.
-Unsupported apps can still teach Flow State through History's Corrected label;
-automatic edit watching intentionally remains limited to standard Windows
-Edit/RichEdit controls.
+When process approval is available, stop only verified Flow State PID 12844,
+restart flow.py --hub from main, and confirm a second --hub launch reaches the
+resident IPC server. Then collect corrected labels for 12 History entries that
+have saved audio. Only after those labels exist should the private engine
+benchmark download or rank any candidate.
 
 ## Don't Forget
 
