@@ -1,7 +1,7 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-14
-**Last verified:** Kariim gave fresh merge approval and the complete reliability branch plus the waveform text correction landed on `main` at merge commit `f13ab0a`. The waveform fix is commit `ed685f5`: status text no longer uses Tk's wrapping width, and is trimmed by the real Segoe UI pixel width so it stays on one line inside the 26px pill. Its bite test failed before the method existed, then the exact merged tree passed all 97 tests in 47.347s and all 8 Python/benchmark files compiled. A native Tk render measured the status text at `(30, 7, 176, 20)` inside its background `(24, 3, 186, 23)`. The laptop checkout is on `main`; its `flow.py` SHA-256 matches the tested merge (`4010552386AE46DAEEF81B807A709A9CFB719BA614ED188698E11BF5F7AC46FB`). The no-install browser comparison measured Flow State's earlier 293.7ms native Notepad result against Wispr's 991ms browser-demo median and Superwhisper's 2601ms browser-tool median; this is browser-only evidence and is not a desktop-app superiority claim. Aqua was excluded because its web sandbox requires a held Space key that the available browser control could not reproduce fairly. Windows Microphone Array was restored as default and temporary Stereo Mix was disabled after testing.
+**Last verified:** Kariim gave fresh merge approval and the complete reliability branch plus the waveform text correction landed on `main` at merge commit `f13ab0a`. The waveform fix is commit `ed685f5`: status text no longer uses Tk's wrapping width, and is trimmed by the real Segoe UI pixel width so it stays on one line inside the 26px pill. Its bite test failed before the method existed, then the exact merged tree passed all 97 tests in 47.347s and all 8 Python/benchmark files compiled. A native Tk render measured the status text at `(30, 7, 176, 20)` inside its background `(24, 3, 186, 23)`. The laptop checkout is on `main`; its `flow.py` SHA-256 matches the tested merge (`4010552386AE46DAEEF81B807A709A9CFB719BA614ED188698E11BF5F7AC46FB`). Flow State was restarted from that checkout as PID `12844`; a second `--hub` launch reached the resident IPC server and returned `Already running; opened the Hub in the existing instance.` The no-install browser comparison measured Flow State's earlier 293.7ms native Notepad result against Wispr's 991ms browser-demo median and Superwhisper's 2601ms browser-tool median; this is browser-only evidence and is not a desktop-app superiority claim. Aqua was excluded because its web sandbox requires a held Space key that the available browser control could not reproduce fairly. Windows Microphone Array was restored as default and temporary Stereo Mix was disabled after testing.
 
 ## Where We Are
 
@@ -126,10 +126,9 @@ generic loader was replaced with a dashboard-shaped local-record skeleton.
 
 ## Do Next
 
-Restart Flow State once so the running process loads the new `main` files, then
-visually confirm one long overlay notice. Do not install competitor apps unless
-Kariim later chooses a true desktop-to-desktop benchmark; the completed
-no-install browser comparison must stay labeled as browser-only evidence.
+No agent-actionable repository work remains from this bundle. Do not install
+competitor apps unless Kariim later chooses a true desktop-to-desktop benchmark;
+the completed no-install comparison must stay labeled as browser-only evidence.
 
 ## Don't Forget
 
