@@ -34,6 +34,190 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual((flow.VERBATIM, flow.POLISH, flow.PROFILE), original_settings)
         history.assert_not_called()
 
+    def test_bounded_watcher_queues_only_inserted_replacement(self):
+        before = "Notes: floor state "
+        after = "Notes: Flow State "
+        snapshots = iter([
+            {
+                "window": 42,
+                "control": 7,
+                "text": before,
+                "selection_start": len(before),
+                "selection_end": len(before),
+            },
+            {
+                "window": 42,
+                "control": 7,
+                "text": after,
+                "selection_start": len(after),
+                "selection_end": len(after),
+            },
+        ])
+        with (
+            mock.patch.object(flow.CORRECTIONS, "observe", return_value={
+                "id": "pair-1", "status": "pending", "matches": 2,
+            }) as observe,
+            mock.patch.object(flow.CORRECTIONS, "set_status") as set_status,
+            mock.patch.object(flow, "CORRECTION_MODE", "after_2_matches"),
+            mock.patch.object(flow, "ui_events") as events,
+        ):
+            pairs = flow.watch_inserted_correction(
+                "floor state ",
+                {"hwnd": 42},
+                snapshot_reader=lambda: next(snapshots),
+                sleep=lambda _delay: None,
+                timeout=1,
+            )
+        self.assertEqual(pairs, [("floor state", "Flow State")])
+        observe.assert_called_once()
+        set_status.assert_not_called()
+        events.put.assert_called_once_with(("accuracy_changed", "Correction ready in Accuracy"))
+
+    def test_repeat_mode_hides_first_observation_without_notification(self):
+        before = "Notes: floor state "
+        after = "Notes: Flow State "
+        snapshots = iter([
+            {
+                "window": 42,
+                "control": 7,
+                "text": before,
+                "selection_start": len(before),
+                "selection_end": len(before),
+            },
+            {
+                "window": 42,
+                "control": 7,
+                "text": after,
+                "selection_start": len(after),
+                "selection_end": len(after),
+            },
+        ])
+        with (
+            mock.patch.object(flow.CORRECTIONS, "observe", return_value={
+                "id": "pair-1", "status": "pending", "matches": 1,
+            }),
+            mock.patch.object(flow, "CORRECTION_MODE", "after_2_matches"),
+            mock.patch.object(flow, "ui_events") as events,
+        ):
+            pairs = flow.watch_inserted_correction(
+                "floor state ",
+                {"hwnd": 42},
+                snapshot_reader=lambda: next(snapshots),
+                sleep=lambda _delay: None,
+                timeout=1,
+            )
+        self.assertEqual(pairs, [("floor state", "Flow State")])
+        events.put.assert_not_called()
+
+    def test_oversized_observation_is_ignored_without_crashing(self):
+        before = "Notes: floor state "
+        after = "Notes: Flow State "
+        snapshots = iter([
+            {
+                "window": 42,
+                "control": 7,
+                "text": before,
+                "selection_start": len(before),
+                "selection_end": len(before),
+            },
+            {
+                "window": 42,
+                "control": 7,
+                "text": after,
+                "selection_start": len(after),
+                "selection_end": len(after),
+            },
+        ])
+        with (
+            mock.patch.object(flow.CORRECTIONS, "observe", return_value=None),
+            mock.patch.object(flow, "CORRECTION_MODE", "after_2_matches"),
+            mock.patch.object(flow, "ui_events") as events,
+        ):
+            pairs = flow.watch_inserted_correction(
+                "floor state ",
+                {"hwnd": 42},
+                snapshot_reader=lambda: next(snapshots),
+                sleep=lambda _delay: None,
+                timeout=1,
+            )
+        self.assertEqual(pairs, [("floor state", "Flow State")])
+        events.put.assert_not_called()
+
+    def test_watcher_storage_failure_is_visible_and_contained(self):
+        with (
+            mock.patch.object(
+                flow,
+                "watch_inserted_correction",
+                side_effect=OSError("disk full"),
+            ),
+            mock.patch.object(flow, "ui_events") as events,
+        ):
+            flow._correction_watch_worker("floor state ", {"hwnd": 42})
+        events.put.assert_called_once_with((
+            "notice", "Correction was detected but could not be saved"
+        ))
+
+    def test_accuracy_event_refreshes_open_hub_badge(self):
+        overlay = object.__new__(flow.Overlay)
+        overlay.root = mock.Mock()
+        overlay._show_partial = mock.Mock()
+        overlay._show = mock.Mock()
+        overlay._hide_partial = mock.Mock()
+        overlay.hub = SimpleNamespace(
+            top=SimpleNamespace(winfo_exists=lambda: True),
+            _update_accuracy_badge=mock.Mock(),
+        )
+        events = flow.queue.Queue()
+        events.put(("accuracy_changed", "Correction ready in Accuracy"))
+        with mock.patch.object(flow, "ui_events", events):
+            overlay._poll()
+        overlay.hub._update_accuracy_badge.assert_called_once_with()
+        overlay._show_partial.assert_called_once_with(
+            "Correction ready in Accuracy", 2600
+        )
+    def test_watcher_stops_when_the_focused_control_changes(self):
+        before = "floor state "
+        snapshots = iter([
+            {
+                "window": 42,
+                "control": 7,
+                "text": before,
+                "selection_start": len(before),
+                "selection_end": len(before),
+            },
+            {
+                "window": 42,
+                "control": 8,
+                "text": "Flow State ",
+                "selection_start": 11,
+                "selection_end": 11,
+            },
+        ])
+        with mock.patch.object(flow.CORRECTIONS, "observe") as observe:
+            pairs = flow.watch_inserted_correction(
+                before,
+                {"hwnd": 42},
+                snapshot_reader=lambda: next(snapshots),
+                sleep=lambda _delay: None,
+                timeout=1,
+            )
+        self.assertEqual(pairs, [])
+        observe.assert_not_called()
+
+    def test_whisper_receives_only_approved_replacement_terms_as_hotwords(self):
+        engine = object.__new__(flow.WhisperEngine)
+        engine.model = mock.Mock()
+        engine.model.transcribe.return_value = (
+            [SimpleNamespace(text=" Flow State is ready ")],
+            None,
+        )
+        with mock.patch.object(flow.CORRECTIONS, "hotwords", return_value="Flow State"):
+            self.assertEqual(engine.transcribe(np.zeros(160, dtype=np.float32)), "Flow State is ready")
+        self.assertEqual(
+            engine.model.transcribe.call_args.kwargs["hotwords"],
+            "Flow State",
+        )
+
     def test_scoped_undo_and_redo_require_same_untouched_target(self):
         target = {"hwnd": 42, "process": "notepad.exe", "title": "Notes"}
         original = (flow.last_insertion, flow.keyboard_generation)
@@ -284,6 +468,8 @@ class DeliveryTests(unittest.TestCase):
         with (
             mock.patch.object(flow, "inject", side_effect=inject),
             mock.patch.object(flow, "log_history", side_effect=fail_history),
+            mock.patch.object(flow.CORRECTIONS, "set_status") as set_status,
+            mock.patch.object(flow, "CORRECTION_MODE", "after_2_matches"),
             mock.patch.object(flow, "ui_events") as events,
         ):
             flow.deliver_text("Hello", trailing_space=False, source="test")
@@ -312,6 +498,8 @@ class DeliveryTests(unittest.TestCase):
             mock.patch.object(flow, "active_window_info", return_value=target),
             mock.patch.object(flow, "DELIVERY", queue),
             mock.patch.object(flow, "log_history", return_value=history_record) as history,
+            mock.patch.object(flow.CORRECTIONS, "set_status") as set_status,
+            mock.patch.object(flow, "CORRECTION_MODE", "after_2_matches"),
             mock.patch.object(flow, "ui_events") as events,
         ):
             result = flow.deliver_text(

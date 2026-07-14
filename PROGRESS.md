@@ -1,8 +1,8 @@
 # Flow State - Progress
 
 **Updated:** 2026-07-14
-**Last verified:** Kariim gave fresh merge approval and the complete reliability branch plus the waveform text correction landed on `main` at merge commit `f13ab0a`. The waveform fix is commit `ed685f5`: status text no longer uses Tk's wrapping width, and is trimmed by the real Segoe UI pixel width so it stays on one line inside the 26px pill. Its bite test failed before the method existed, then the exact merged tree passed all 97 tests in 47.347s and all 8 Python/benchmark files compiled. A native Tk render measured the status text at `(30, 7, 176, 20)` inside its background `(24, 3, 186, 23)`. The laptop checkout is on `main`; its `flow.py` SHA-256 matches the tested merge (`4010552386AE46DAEEF81B807A709A9CFB719BA614ED188698E11BF5F7AC46FB`). Flow State was restarted from that checkout as PID `12844`; a second `--hub` launch reached the resident IPC server and returned `Already running; opened the Hub in the existing instance.` The no-install browser comparison measured Flow State's earlier 293.7ms native Notepad result against Wispr's 991ms browser-demo median and Superwhisper's 2601ms browser-tool median; this is browser-only evidence and is not a desktop-app superiority claim. Aqua was excluded because its web sandbox requires a held Space key that the available browser control could not reproduce fairly. Windows Microphone Array was restored as default and temporary Stereo Mix was disabled after testing.
-**Documentation audit:** The user guide, engineering handoff, migration guide, research status, differentiator evidence, and completed wargames were reconciled with the shipped app. Runtime code and user data are unchanged. The audited tree passed all 97 tests in 37.301s, compiled all 8 Python/test/benchmark files, and has no broken local Markdown file references.
+**Last verified:** The approved Accuracy Learning release candidate on feat/accuracy-learning passed all 120 tests in 86.838s, including 19 native Tk Hub tests. Focused native checks proved 64-bit standard Edit/RichEdit reads, password-control exclusion, bounded correction watching, supported 800x560 and 940x680 Hub geometry, and clean Tk callback teardown. Independent general, Python, and security reviews were resolved before this run: Unicode case variants cannot crash approved corrections, repeat mode does not announce hidden first observations, oversized observations are ignored safely, History and Delivery Queue writes are serialized, malformed stores are preserved, and pending corrections never change text.
+**Documentation audit:** README and HANDOFF now describe the shipped local correction memory, explicit approval modes, corrected History labels, private 12-record benchmark gate, and the standard-control watcher boundary. No candidate engine has been downloaded or ranked.
 
 ## Where We Are
 
@@ -16,7 +16,7 @@ polish cleanup, and a modern Hub options screen.
 
 The Hub now has a paper/graph-paper layout, dark mode, a grand Bodoni F in the
 muted-indigo brand color, matching toggle knobs on neutral tracks, sidebar icon nav, and pages for History,
-Recovery, Dictionary, General, Dictation, Audio & mic, Appearance, Privacy, Files &
+Recovery, Delivery queue, Dictionary, Accuracy, General, Dictation, Audio & mic, Appearance, Privacy, Files &
 meetings, and Statistics. Header/title clipping was fixed by reducing the
 Georgia header sizes and increasing header height.
 
@@ -122,11 +122,24 @@ hard-cap warnings from existing local stores. The external review prototype
 passed light/dark, narrow/full-width, state-recovery, zero-overflow, and
 clean-console checks; it is not required by the shipped native page.
 
+Accuracy Learning is release-ready. The Accuracy page shows every visible
+pending correction, approved memory, and the Personal Accuracy Lab readiness
+gate. Automatic observations always stay pending until Kariim approves them.
+Approved pairs are applied once after Moonshine recognition and are also sent to
+Whisper as hotwords. History keeps original, delivered final, and corrected
+labels separate. The read-only watcher is limited to the exact inserted range in
+standard Windows Edit/RichEdit controls, excludes password fields, stops on
+focus/control change, and never writes into the target app. Privacy can clear
+learned corrections independently of History.
+
 ## Do Next
 
-No agent-actionable repository work remains from this bundle. Do not install
-competitor apps unless Kariim later chooses a true desktop-to-desktop benchmark;
-the completed no-install comparison must stay labeled as browser-only evidence.
+Collect corrected labels for 12 History entries that have saved audio. Only
+then run the private engine benchmark and compare measured accuracy and speed.
+Do not download a candidate model or name a winner before that evidence exists.
+Unsupported apps can still teach Flow State through History's Corrected label;
+automatic edit watching intentionally remains limited to standard Windows
+Edit/RichEdit controls.
 
 ## Don't Forget
 
@@ -146,6 +159,12 @@ the completed no-install comparison must stay labeled as browser-only evidence.
   exclusive until a matching benchmark or current competitor audit proves it.
 - Run unittest and `py_compile` sequentially because parallel runs race on pyc
   files. The current cache target is locked, so compile to a separate path.
+- Automatic correction watching supports standard Windows Edit/RichEdit fields
+  only, never password controls; use History's Corrected label everywhere else.
+- Every observed correction remains pending until explicit approval. Review
+  after 2 matches changes visibility, not approval.
+- Candidate-engine ranking is blocked until 12 corrected saved-audio labels
+  exist; no candidate download or winner is current.
 - Native Tk 8.6.12 now initializes in the desktop runtime. The all-pages test
   needs roughly 75 seconds on its first layout pass, so poll the running test
   process instead of treating a short command-window timeout as a failure.
@@ -155,9 +174,6 @@ the completed no-install comparison must stay labeled as browser-only evidence.
 - The guarded live Notepad run now passes exact-text checks. Keep recognition
   and Windows delivery timed separately: delivery measured 24.7 ms median /
   57.9 ms max while Base recognition was load-sensitive.
-- This Codex sandbox cannot write `C:\Users\Kariim\flow-state` or
-  `C:\Users\Kariim\relay`; do not route around that gate with `git apply`, an
-  approved Python process, or another indirect writer.
 
 ## Why It's Built This Way
 
@@ -205,4 +221,9 @@ the completed no-install comparison must stay labeled as browser-only evidence.
 - 2026-07-13 - Integrated the exact verified eleven-file reliability bundle without rewriting it. Protected launcher and user-data hashes stayed identical; candidate and live 96-test suites passed; the integrated Hub reached Ready; and guarded Notepad insertion was exact.
 - 2026-07-13 - Revalidated the ten differentiators against current official competitor documentation. Wispr, Aqua, and Superwhisper now ship adjacent retry, recent-audio rerun, reprocess, and clipboard features, so the evidence names that overlap and scopes each gap to Flow State's complete guarded behavior. None of the three competitor apps is installed locally; an honest responsiveness ranking still requires a same-machine competitor run rather than vendor WPM claims.
 - 2026-07-14 - Merged the complete reliability branch to `main` only after Kariim's fresh approval. Replaced character-count overlay truncation with measured Segoe UI pixel fitting and removed Tk wrapping; the exact merge passed 97 tests, compile, and native Tk bounds verification.
+- 2026-07-14 - Added private Accuracy Learning around explicit approval: observed
+  edits never alter output until approved, History labels stay separate from
+  delivered text, and candidate benchmarking waits for 12 corrected audio
+  records. Standard Edit/RichEdit watching is bounded, read-only, and excludes
+  password fields; unsupported apps use manual History correction.
 - 2026-07-14 - Audited every tracked project document against the merged modules, Hub navigation, icons, feature status, and 97-test suite. Replaced active-branch and isolated-build wording with shipped state, labeled research/wargames as historical artifacts, corrected migration/runtime-data guidance, and verified every local Markdown file reference.
