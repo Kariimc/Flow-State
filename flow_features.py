@@ -7,11 +7,13 @@ audio devices, or a display.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
 import statistics
 import tempfile
+import threading
 import uuid
 import wave
 from collections import Counter
@@ -246,6 +248,232 @@ def read_wav(path: str | os.PathLike, target_rate: int = 16000) -> np.ndarray:
     return audio
 
 
+_TOKEN = re.compile(r"\w+(?:['’-]\w+)*|[^\w\s]", re.UNICODE)
+
+
+def _tokens(text: str) -> list[re.Match]:
+    return list(_TOKEN.finditer(text or ""))
+
+
+def _join_tokens(values: list[str]) -> str:
+    text = " ".join(values)
+    text = re.sub(r"\s+([,.;:?!%)\]}])", r"\1", text)
+    text = re.sub(r"([(\[{])\s+", r"\1", text)
+    return text.strip()
+
+
+def extract_correction_pairs(
+    before: str,
+    after: str,
+    changed_start: int = 0,
+    changed_end: int | None = None,
+    max_tokens: int = 8,
+) -> list[tuple[str, str]]:
+    """Return small replacement pairs overlapping a trusted character range.
+
+    Insertions and deletions are intentionally ignored: they are more likely to
+    be ordinary rewriting than speech-recognition corrections.
+    """
+    old_matches = _tokens(before)
+    new_matches = _tokens(after)
+    old_values = [match.group(0) for match in old_matches]
+    new_values = [match.group(0) for match in new_matches]
+    changed_end = len(before) if changed_end is None else max(changed_start, changed_end)
+    pairs = []
+    matcher = difflib.SequenceMatcher(a=old_values, b=new_values, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "replace" or i1 == i2 or j1 == j2:
+            continue
+        if i2 - i1 > max_tokens or j2 - j1 > max_tokens:
+            continue
+        old_start = old_matches[i1].start()
+        old_end = old_matches[i2 - 1].end()
+        if old_start < changed_start or old_end > changed_end:
+            continue
+        spoken = _join_tokens(old_values[i1:i2])
+        replacement = _join_tokens(new_values[j1:j2])
+        if (
+            spoken
+            and replacement
+            and spoken != replacement
+            and re.search(r"\w", spoken)
+            and re.search(r"\w", replacement)
+        ):
+            pairs.append((spoken, replacement))
+    return pairs
+
+
+class CorrectionStore:
+    """Atomic local store for reviewable speech-correction pairs."""
+
+    VALID_STATUSES = {"pending", "approved", "rejected"}
+
+    def __init__(self, root: str | os.PathLike):
+        self.root = Path(root).resolve()
+        self.path = self.root / "corrections.json"
+        self._lock = threading.RLock()
+
+    def _read_unlocked(self) -> list[dict]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError):
+            return []
+        if not isinstance(data, list):
+            return []
+        return [
+            item for item in data
+            if isinstance(item, dict)
+            and item.get("id")
+            and item.get("spoken")
+            and item.get("replacement")
+            and item.get("status") in self.VALID_STATUSES
+        ]
+
+    def read(self, status: str | None = None) -> list[dict]:
+        with self._lock:
+            records = self._read_unlocked()
+        if status is not None:
+            records = [item for item in records if item.get("status") == status]
+        return sorted(records, key=lambda item: item.get("last_seen", ""), reverse=True)
+
+    def _write_unlocked(self, records: list[dict]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix="corrections-", suffix=".tmp", dir=self.root)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                json.dump(records, out, ensure_ascii=False, indent=2)
+                out.write("\n")
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(temp_name, self.path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
+
+    def _ensure_writable_unlocked(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except OSError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Correction memory is damaged; original file kept") from exc
+        if not isinstance(data, list) or len(self._read_unlocked()) != len(data):
+            raise ValueError("Correction memory is damaged; original file kept")
+
+    def observe(
+        self,
+        spoken: str,
+        replacement: str,
+        *,
+        source_id: str = "",
+    ) -> dict | None:
+        spoken = " ".join(str(spoken or "").split()).strip()
+        replacement = " ".join(str(replacement or "").split()).strip()
+        if (
+            not spoken
+            or not replacement
+            or spoken == replacement
+            or len(spoken) > 200
+            or len(replacement) > 200
+        ):
+            return None
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            self._ensure_writable_unlocked()
+            records = self._read_unlocked()
+            match = next(
+                (
+                    item for item in records
+                    if item["spoken"].casefold() == spoken.casefold()
+                    and item["replacement"] == replacement
+                ),
+                None,
+            )
+            if match is None:
+                match = {
+                    "id": uuid.uuid4().hex[:12],
+                    "spoken": spoken,
+                    "replacement": replacement,
+                    "status": "pending",
+                    "matches": 1,
+                    "first_seen": now,
+                    "last_seen": now,
+                    "sources": [source_id] if source_id else [],
+                }
+                records.append(match)
+            elif not source_id or source_id not in match.get("sources", []):
+                match["matches"] = int(match.get("matches", 1)) + 1
+                match["last_seen"] = now
+                if source_id:
+                    match.setdefault("sources", []).append(source_id)
+                    match["sources"] = match["sources"][-12:]
+
+            self._write_unlocked(records)
+            return dict(match)
+
+    def set_status(self, correction_id: str, status: str) -> bool:
+        if status not in self.VALID_STATUSES:
+            raise ValueError("Unknown correction status")
+        with self._lock:
+            self._ensure_writable_unlocked()
+            records = self._read_unlocked()
+            match = next((item for item in records if item.get("id") == correction_id), None)
+            if match is None:
+                return False
+            match["status"] = status
+            match["reviewed_at"] = datetime.now().isoformat(timespec="seconds")
+            self._write_unlocked(records)
+        return True
+
+    def apply(self, text: str) -> str:
+        rules = sorted(
+            self.read("approved"),
+            key=lambda item: len(item["spoken"]),
+            reverse=True,
+        )
+        replacements = {}
+        for item in rules:
+            replacements.setdefault(item["spoken"].casefold(), item["replacement"])
+        if not replacements:
+            return text
+        alternatives = "|".join(
+            re.escape(spoken)
+            for spoken in sorted(replacements, key=len, reverse=True)
+        )
+        pattern = re.compile(r"(?<!\w)(?:%s)(?!\w)" % alternatives, re.IGNORECASE)
+        return pattern.sub(
+            lambda match: replacements.get(
+                match.group(0).casefold(),
+                match.group(0),
+            ),
+            text,
+        )
+
+    def clear(self) -> int:
+        with self._lock:
+            records = self._read_unlocked()
+            self._write_unlocked([])
+        return len(records)
+
+    def hotwords(self) -> str:
+        values = []
+        for item in self.read("approved"):
+            value = item["replacement"]
+            if value not in values:
+                values.append(value)
+        return ", ".join(values)
+
+    def stats(self) -> dict:
+        records = self.read()
+        return {
+            "pending": sum(item["status"] == "pending" for item in records),
+            "approved": sum(item["status"] == "approved" for item in records),
+            "rejected": sum(item["status"] == "rejected" for item in records),
+        }
+
+
 class HistoryStore:
     """Append-only local history with guarded audio retention."""
 
@@ -253,6 +481,7 @@ class HistoryStore:
         self.root = Path(root).resolve()
         self.path = self.root / "history.jsonl"
         self.audio_dir = self.root / "recordings"
+        self._lock = threading.RLock()
 
     def add(
         self,
@@ -287,28 +516,44 @@ class HistoryStore:
             "source": source,
             "words": len(final.split()),
         }
-        self.root.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a", encoding="utf-8") as out:
-            out.write(json.dumps(record, ensure_ascii=False) + "\n")
-            out.flush()
-            os.fsync(out.fileno())
+        with self._lock:
+            self.root.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as out:
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
         return record
 
-    def read(self) -> list[dict]:
+    def _read_unlocked(self, strict: bool = False) -> list[dict]:
         records = []
         try:
             with open(self.path, encoding="utf-8") as source:
                 for line in source:
                     try:
                         record = json.loads(line)
-                    except (TypeError, ValueError):
+                    except (TypeError, ValueError) as exc:
+                        if strict:
+                            raise ValueError(
+                                "History contains unreadable data; original file kept"
+                            ) from exc
                         continue
                     if isinstance(record, dict) and record.get("id"):
                         records.append(record)
-        except OSError:
+                    elif strict:
+                        raise ValueError(
+                            "History contains unreadable data; original file kept"
+                        )
+        except FileNotFoundError:
             pass
+        except OSError:
+            if strict:
+                raise
         records.reverse()
         return records
+
+    def read(self) -> list[dict]:
+        with self._lock:
+            return self._read_unlocked()
 
     def find(self, record_id: str) -> dict | None:
         return next((item for item in self.read() if item.get("id") == record_id), None)
@@ -323,7 +568,7 @@ class HistoryStore:
             return None
         return candidate
 
-    def rewrite(self, records: list[dict]) -> None:
+    def _rewrite_unlocked(self, records: list[dict]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(prefix="history-", suffix=".tmp", dir=self.root)
         try:
@@ -337,48 +582,71 @@ class HistoryStore:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
 
+    def rewrite(self, records: list[dict]) -> None:
+        with self._lock:
+            self._rewrite_unlocked(records)
+
+    def save_correction(self, record_id: str, corrected: str) -> dict | None:
+        corrected = str(corrected or "").strip()
+        if not corrected:
+            raise ValueError("Corrected text cannot be empty")
+        with self._lock:
+            records = self._read_unlocked(strict=True)
+            record = next((item for item in records if item.get("id") == record_id), None)
+            if record is None:
+                return None
+            record["corrected"] = corrected
+            record["corrected_at"] = datetime.now().isoformat(timespec="seconds")
+            self._rewrite_unlocked(records)
+            return dict(record)
+
     def delete(self, record_id: str) -> bool:
-        records = self.read()
-        victim = next((r for r in records if r.get("id") == record_id), None)
-        if victim is None:
-            return False
-        audio_path = self._safe_audio_path(victim.get("audio_path", ""))
-        self.rewrite([r for r in records if r.get("id") != record_id])
-        if audio_path and audio_path.exists():
-            audio_path.unlink()
-        return True
+        with self._lock:
+            records = self._read_unlocked()
+            victim = next((r for r in records if r.get("id") == record_id), None)
+            if victim is None:
+                return False
+            audio_path = self._safe_audio_path(victim.get("audio_path", ""))
+            self._rewrite_unlocked(
+                [r for r in records if r.get("id") != record_id]
+            )
+            if audio_path and audio_path.exists():
+                audio_path.unlink()
+            return True
 
     def prune(self, days: int) -> int:
         if days <= 0:
             return 0
-        cutoff = datetime.now() - timedelta(days=days)
-        removed = 0
-        keep = []
-        for record in self.read():
-            try:
-                timestamp = datetime.fromisoformat(record["timestamp"])
-            except (KeyError, TypeError, ValueError):
-                keep.append(record)
-                continue
-            if timestamp >= cutoff:
-                keep.append(record)
-                continue
-            audio_path = self._safe_audio_path(record.get("audio_path", ""))
-            if audio_path and audio_path.exists():
-                audio_path.unlink()
-            removed += 1
-        if removed:
-            self.rewrite(keep)
-        return removed
+        with self._lock:
+            cutoff = datetime.now() - timedelta(days=days)
+            removed = 0
+            keep = []
+            for record in self._read_unlocked():
+                try:
+                    timestamp = datetime.fromisoformat(record["timestamp"])
+                except (KeyError, TypeError, ValueError):
+                    keep.append(record)
+                    continue
+                if timestamp >= cutoff:
+                    keep.append(record)
+                    continue
+                audio_path = self._safe_audio_path(record.get("audio_path", ""))
+                if audio_path and audio_path.exists():
+                    audio_path.unlink()
+                removed += 1
+            if removed:
+                self._rewrite_unlocked(keep)
+            return removed
 
     def clear(self) -> int:
-        records = self.read()
-        for record in records:
-            audio_path = self._safe_audio_path(record.get("audio_path", ""))
-            if audio_path and audio_path.exists():
-                audio_path.unlink()
-        self.rewrite([])
-        return len(records)
+        with self._lock:
+            records = self._read_unlocked()
+            for record in records:
+                audio_path = self._safe_audio_path(record.get("audio_path", ""))
+                if audio_path and audio_path.exists():
+                    audio_path.unlink()
+            self._rewrite_unlocked([])
+            return len(records)
 
     def stats(self, max_record: float = 0.0) -> dict:
         records = self.read()
@@ -563,6 +831,7 @@ class DeliveryQueue:
     def __init__(self, root: str | os.PathLike):
         self.root = Path(root).resolve()
         self.path = self.root / "delivery-queue.jsonl"
+        self._lock = threading.RLock()
 
     def add(
         self,
@@ -590,32 +859,34 @@ class DeliveryQueue:
             "source": str(source or "dictation"),
             "reason": str(reason or "delivery failed"),
         }
-        self.root.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a", encoding="utf-8") as out:
-            out.write(json.dumps(record, ensure_ascii=False) + "\n")
-            out.flush()
-            os.fsync(out.fileno())
+        with self._lock:
+            self.root.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as out:
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
         return record
 
     def read(self) -> list[dict]:
-        records = []
-        try:
-            with open(self.path, encoding="utf-8") as source:
-                for line in source:
-                    try:
-                        record = json.loads(line)
-                    except (TypeError, ValueError):
-                        continue
-                    if (
-                        isinstance(record, dict)
-                        and self.RECORD_ID.fullmatch(str(record.get("id", "")))
-                        and record.get("text")
-                    ):
-                        records.append(record)
-        except OSError:
-            pass
-        records.reverse()
-        return records
+        with self._lock:
+            records = []
+            try:
+                with open(self.path, encoding="utf-8") as source:
+                    for line in source:
+                        try:
+                            record = json.loads(line)
+                        except (TypeError, ValueError):
+                            continue
+                        if (
+                            isinstance(record, dict)
+                            and self.RECORD_ID.fullmatch(str(record.get("id", "")))
+                            and record.get("text")
+                        ):
+                            records.append(record)
+            except OSError:
+                pass
+            records.reverse()
+            return records
 
     def _rewrite(self, records: list[dict]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -634,8 +905,12 @@ class DeliveryQueue:
     def complete(self, record_id: str) -> bool:
         if not self.RECORD_ID.fullmatch(str(record_id)):
             return False
-        records = self.read()
-        if not any(record.get("id") == record_id for record in records):
-            return False
-        self._rewrite([record for record in records if record.get("id") != record_id])
+        with self._lock:
+            records = self.read()
+            if not any(record.get("id") == record_id for record in records):
+                return False
+            self._rewrite([
+                record for record in records
+                if record.get("id") != record_id
+            ])
         return True

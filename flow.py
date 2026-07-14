@@ -21,6 +21,7 @@ import time
 import tkinter as tk
 import winsound
 from collections import deque
+from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, font as tkfont, messagebox
@@ -31,11 +32,13 @@ import pyperclip
 
 from flow_features import (
     PROFILE_PRESETS,
+    CorrectionStore,
     DeliveryQueue,
     HistoryStore,
     RecoveryJournal,
     apply_vocabulary,
     choose_profile,
+    extract_correction_pairs,
     polish_text,
     read_wav,
     transform_selected_text,
@@ -71,6 +74,7 @@ SAVE_AUDIO = True       # retain WAV audio beside searchable history
 HISTORY_DAYS = 30       # 0 = keep forever
 THEME = "light"         # light or dark Hub theme
 OPEN_HUB = False        # show the Hub after startup
+CORRECTION_MODE = "always_review"  # always_review, after_2_matches, or manual_only
 # ----------------------------------------------------------
 
 # settings.json (edited from the Hub's Options tab) overrides the defaults
@@ -81,7 +85,7 @@ TWEAKABLE = [
     "REDO_HOTKEY", "ENGINE", "INJECTION",
     "VERBATIM", "AUTO_STOP", "MAX_RECORD", "IDLE_FADE", "POLISH", "PROFILE",
     "APP_PROFILES", "MICROPHONE", "SOUND_CUES", "SAVE_AUDIO", "HISTORY_DAYS",
-    "THEME", "OPEN_HUB",
+    "THEME", "OPEN_HUB", "CORRECTION_MODE",
 ]
 
 
@@ -122,6 +126,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 HISTORY = HistoryStore(DATA_DIR)
 RECOVERY = RecoveryJournal(DATA_DIR)
 DELIVERY = DeliveryQueue(DATA_DIR)
+CORRECTIONS = CorrectionStore(DATA_DIR)
 
 
 def active_window_info() -> dict:
@@ -131,6 +136,181 @@ def active_window_info() -> dict:
     except Exception:
         return {"hwnd": 0, "process": "", "title": ""}
     return window_info(int(hwnd or 0))
+
+
+class _GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", wintypes.RECT),
+    ]
+
+
+def _send_message_timeout(hwnd: int, message: int, wparam=0, lparam=0) -> int | None:
+    result = ctypes.c_size_t()
+    try:
+        sender = ctypes.windll.user32.SendMessageTimeoutW
+        sender.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+            wintypes.UINT,
+            wintypes.UINT,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        sender.restype = wintypes.LPARAM
+        sent = sender(
+            hwnd,
+            message,
+            wparam,
+            lparam,
+            0x0002,
+            100,
+            ctypes.byref(result),
+        )
+    except Exception:
+        return None
+    return int(result.value) if sent else None
+
+
+def _is_password_edit(control: int) -> bool:
+    try:
+        getter = getattr(
+            ctypes.windll.user32,
+            "GetWindowLongPtrW",
+            ctypes.windll.user32.GetWindowLongW,
+        )
+        if int(getter(control, -16) or 0) & 0x0020:
+            return True
+    except Exception:
+        return True
+    password_char = _send_message_timeout(control, 0x00D2)
+    return password_char is None or bool(password_char)
+
+def _edit_snapshot(window: int, control: int) -> dict | None:
+    try:
+        user32 = ctypes.windll.user32
+        class_name = ctypes.create_unicode_buffer(96)
+        if not control or not user32.GetClassNameW(control, class_name, len(class_name)):
+            return None
+        if "edit" not in class_name.value.casefold() or _is_password_edit(control):
+            return None
+        length = _send_message_timeout(control, 0x000E)
+        if length is None or length < 0 or length > 60000:
+            return None
+        value = ctypes.create_unicode_buffer(length + 1)
+        if _send_message_timeout(
+            control, 0x000D, length + 1, ctypes.addressof(value)
+        ) is None:
+            return None
+        selection = _send_message_timeout(control, 0x00B0)
+        if selection is None:
+            return None
+        return {
+            "window": int(window or 0),
+            "control": int(control or 0),
+            "text": value.value,
+            "selection_start": selection & 0xFFFF,
+            "selection_end": (selection >> 16) & 0xFFFF,
+        }
+    except Exception:
+        return None
+
+
+def focused_edit_snapshot() -> dict | None:
+    """Read the foreground standard Edit/RichEdit control without changing it."""
+    try:
+        user32 = ctypes.windll.user32
+        window = int(user32.GetForegroundWindow() or 0)
+        thread_id = int(user32.GetWindowThreadProcessId(window, 0) or 0)
+        info = _GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(info)
+        if not window or not thread_id or not user32.GetGUIThreadInfo(
+            thread_id, ctypes.byref(info)
+        ):
+            return None
+        return _edit_snapshot(window, int(info.hwndFocus or 0))
+    except Exception:
+        return None
+
+def watch_inserted_correction(
+    inserted: str,
+    target: dict,
+    *,
+    snapshot_reader=focused_edit_snapshot,
+    sleep=time.sleep,
+    timeout: float = 12.0,
+    interval: float = 0.5,
+) -> list[tuple[str, str]]:
+    """Watch one inserted range briefly and queue only overlapping replacements."""
+    sleep(0.08)
+    baseline = snapshot_reader()
+    if not baseline or baseline.get("window") != int(target.get("hwnd", 0) or 0):
+        return []
+    end = int(baseline.get("selection_end", 0))
+    start = end - len(inserted)
+    if start < 0 or baseline.get("text", "")[start:end] != inserted:
+        return []
+    deadline = time.monotonic() + max(0.0, timeout)
+    source_id = "watch-%s" % time.time_ns()
+    while time.monotonic() < deadline:
+        sleep(interval)
+        current = snapshot_reader()
+        if (
+            not current
+            or current.get("window") != baseline.get("window")
+            or current.get("control") != baseline.get("control")
+        ):
+            return []
+        if current.get("text") == baseline.get("text"):
+            continue
+        pairs = extract_correction_pairs(
+            baseline.get("text", ""),
+            current.get("text", ""),
+            start,
+            end,
+        )
+        observed = []
+        for spoken, replacement in pairs:
+            item = CORRECTIONS.observe(
+                spoken,
+                replacement,
+                source_id=source_id,
+            )
+            if item is not None:
+                observed.append(item)
+        visible = CORRECTION_MODE == "always_review" or any(
+            int(item.get("matches", 0)) >= 2
+            for item in observed
+        )
+        if pairs and visible:
+            ui_events.put(("accuracy_changed", "Correction ready in Accuracy"))
+        return pairs
+    return []
+
+
+def _correction_watch_worker(inserted: str, target: dict) -> None:
+    try:
+        watch_inserted_correction(inserted, target)
+    except (OSError, ValueError) as exc:
+        print("Correction watch save failed: %s" % exc)
+        ui_events.put(("notice", "Correction was detected but could not be saved"))
+
+def start_correction_watch(inserted: str, target: dict) -> None:
+    if CORRECTION_MODE == "manual_only" or not inserted or not target.get("hwnd"):
+        return
+    threading.Thread(
+        target=_correction_watch_worker,
+        args=(inserted, target),
+        daemon=True,
+    ).start()
 
 
 def active_process_name() -> str:
@@ -421,9 +601,15 @@ class WhisperEngine:
         self.model = WhisperModel(WHISPER_SIZE, device="cpu", compute_type="int8")
 
     def transcribe(self, audio: np.ndarray) -> str:
-        segments, _ = self.model.transcribe(
-            audio, language=LANGUAGE, vad_filter=True, beam_size=1
-        )
+        options = {
+            "language": LANGUAGE,
+            "vad_filter": True,
+            "beam_size": 1,
+        }
+        hotwords = CORRECTIONS.hotwords()
+        if hotwords:
+            options["hotwords"] = hotwords
+        segments, _ = self.model.transcribe(audio, **options)
         return " ".join(seg.text.strip() for seg in segments).strip()
 
 
@@ -478,6 +664,7 @@ def finish_text_mode(
     polish: bool = True,
 ) -> str:
     text = DICT.apply(clean_text_mode(raw, verbatim))
+    text = CORRECTIONS.apply(text)
     text = apply_vocabulary(text, os.path.join(BASE_DIR, "vocabulary.txt"))
     if polish and not verbatim:
         text = polish_text(text, profile)
@@ -1115,6 +1302,8 @@ def deliver_text(
             0.0, float((inserted_at or time.time()) - delivery_started)
         )
     remember_insertion(text, target_info, trailing_space)
+    if history.get("source") != "continuous":
+        start_correction_watch(text + (" " if trailing_space else ""), target_info)
     if not persist_history:
         return {"delivered": True}
     try:
@@ -2102,6 +2291,10 @@ class Overlay:
                         self._show_partial(text)
                     elif kind == "notice":
                         self._show_partial(text, 2600)
+                    elif kind == "accuracy_changed":
+                        self._show_partial(text, 2600)
+                        if self.hub and self.hub.top.winfo_exists():
+                            self.hub._update_accuracy_badge()
                     elif kind == "startup_error":
                         self._show_partial("Startup failed: " + text, 5000)
                         if self.hub and self.hub.top.winfo_exists():

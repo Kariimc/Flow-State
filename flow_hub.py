@@ -49,6 +49,13 @@ DARK = {
 }
 
 
+CORRECTION_MODE_LABELS = {
+    "always_review": "Always review",
+    "after_2_matches": "Review after 2 matches",
+    "manual_only": "Manual only",
+}
+CORRECTION_MODE_VALUES = {label: value for value, label in CORRECTION_MODE_LABELS.items()}
+
 class Switch(tk.Canvas):
     def __init__(self, parent, variable, colors, command=None):
         super().__init__(
@@ -89,6 +96,7 @@ class Hub:
         ("recovery", "Recovery"),
         ("delivery", "Delivery queue"),
         ("dictionary", "Dictionary"),
+        ("accuracy", "Accuracy"),
         ("general", "General"),
         ("dictation", "Dictation"),
         ("audio", "Audio & mic"),
@@ -118,6 +126,7 @@ class Hub:
         self.recovery_badge = None
         self.delivery_records = []
         self.delivery_badge = None
+        self.accuracy_badge = None
         self.dictionary_rules = []
         self.mic_map = {"System default": None}
         self._init_vars()
@@ -147,6 +156,9 @@ class Hub:
         self.undo_hotkey_var = tk.StringVar(value=a.UNDO_HOTKEY)
         self.redo_hotkey_var = tk.StringVar(value=a.REDO_HOTKEY)
         self.theme_var = tk.StringVar(value=a.THEME)
+        self.correction_mode_var = tk.StringVar(
+            value=CORRECTION_MODE_LABELS.get(a.CORRECTION_MODE, "Always review")
+        )
         self.mic_var = tk.StringVar(value="System default")
 
     def _build_shell(self):
@@ -211,11 +223,19 @@ class Hub:
                     cursor="hand2",
                 )
                 widgets.append(self.delivery_badge)
+            elif key == "accuracy":
+                self.accuracy_badge = tk.Label(
+                    row, text="", font=("Segoe UI Semibold", 8),
+                    fg=c["paper"], bg=c["brand"], padx=6, pady=1,
+                    cursor="hand2",
+                )
+                widgets.append(self.accuracy_badge)
             for widget in widgets:
                 widget.bind("<Button-1>", lambda _e, page=key: self.show_page(page))
             self.nav_rows[key] = (row, icon, text)
         self._update_recovery_badge()
         self._update_delivery_badge()
+        self._update_accuracy_badge()
         tk.Label(
             self.sidebar, text="Flow State | offline", font=("Segoe UI", 8),
             fg=c["muted"], bg=c["paper2"],
@@ -297,6 +317,11 @@ class Hub:
         elif key == "dictionary":
             icon.create_rectangle(2, 3, 8, 15, outline=color)
             icon.create_rectangle(10, 3, 16, 15, outline=color)
+        elif key == "accuracy":
+            icon.create_oval(2, 2, 16, 16, outline=color, width=1.4)
+            icon.create_oval(6, 6, 12, 12, outline=color, width=1.2)
+            icon.create_line(9, 0, 9, 5, 9, 13, 9, 18, fill=color, width=1.2)
+            icon.create_line(0, 9, 5, 9, 13, 9, 18, 9, fill=color, width=1.2)
         elif key == "general":
             icon.create_oval(5, 5, 13, 13, outline=color, width=1.5)
             icon.create_line(9, 1, 9, 5, 9, 13, 9, 17, fill=color)
@@ -479,6 +504,24 @@ class Hub:
             else:
                 self.delivery_badge.pack_forget()
 
+    def _update_accuracy_badge(self, count=None):
+        if count is None:
+            try:
+                pending = self.app.CORRECTIONS.read("pending")
+                if self.app.CORRECTION_MODE == "after_2_matches":
+                    pending = [
+                        item for item in pending
+                        if int(item.get("matches", 0)) >= 2
+                    ]
+                count = len(pending)
+            except (OSError, ValueError):
+                count = 0
+        if self.accuracy_badge and self.accuracy_badge.winfo_exists():
+            if count:
+                self.accuracy_badge.configure(text=str(count))
+                self.accuracy_badge.pack(side="right", padx=(4, 9), pady=6)
+            else:
+                self.accuracy_badge.pack_forget()
     def show_page(self, key):
         self.current_page = key
         for page, (row, icon, label) in self.nav_rows.items():
@@ -493,6 +536,8 @@ class Hub:
             eyebrow = "SAFE INSERTION"
         elif key == "recovery":
             eyebrow = "LOCAL SAFETY"
+        elif key == "accuracy":
+            eyebrow = "PERSONAL INTELLIGENCE"
         elif key in ("history", "dictionary"):
             eyebrow = "FLOW STATE"
         else:
@@ -505,6 +550,158 @@ class Hub:
         renderer()
         self.page_canvas.yview_moveto(0)
 
+    def _page_accuracy(self):
+        self._intro(
+            "Review what Flow State learned and compare engines only after your own corrections create a fair baseline."
+        )
+        try:
+            stats = self.app.CORRECTIONS.stats()
+            pending = self.app.CORRECTIONS.read("pending")
+            mode = CORRECTION_MODE_VALUES.get(
+                self.correction_mode_var.get(), "always_review"
+            )
+            if mode == "after_2_matches":
+                pending = [
+                    item for item in pending
+                    if int(item.get("matches", 0)) >= 2
+                ]
+            approved = self.app.CORRECTIONS.read("approved")
+            history = self.app.HISTORY.read()
+        except (OSError, ValueError) as exc:
+            section = self._section("Accuracy data could not be opened")
+            tk.Label(
+                section, text=str(exc), font=("Segoe UI", 9),
+                fg=self.colors["danger"], bg=self.colors["paper"],
+            ).pack(anchor="w", padx=16, pady=(0, 14))
+            return
+
+        recordings = [item for item in history if item.get("audio_path")]
+        corrected = [
+            item for item in recordings
+            if str(item.get("corrected", "")).strip()
+        ]
+        summary = self._section(
+            "Correction memory",
+            "Nothing changes Flow State's output until a correction is approved.",
+        )
+        for title, value, note in (
+            ("Recordings ready", len(recordings), "Available for a private baseline"),
+            ("Needs review", len(pending), "Detected edits waiting for you"),
+            ("Corrected labels", len(corrected), "12 needed for a useful comparison"),
+        ):
+            self._row(
+                summary, title, note,
+                lambda host, value=value: tk.Label(
+                    host, text=str(value), font=("Georgia", 14, "bold"),
+                    fg=self.colors["brand"], bg=self.colors["paper"],
+                ),
+            )
+
+        review = self._section(
+            "Learned corrections",
+            "Approve a pair once, or reject it permanently.",
+        )
+        if not pending:
+            tk.Label(
+                review, text="No corrections are waiting for review.",
+                font=("Segoe UI", 9), fg=self.colors["muted"],
+                bg=self.colors["paper"],
+            ).pack(anchor="w", padx=16, pady=(2, 14))
+        for item in pending:
+            card = tk.Frame(
+                review, bg=self.colors["paper2"], highlightthickness=1,
+                highlightbackground=self.colors["border"],
+            )
+            card.pack(fill="x", padx=16, pady=(3, 7))
+            copy = tk.Frame(card, bg=self.colors["paper2"])
+            copy.pack(side="left", fill="x", expand=True, padx=12, pady=10)
+            tk.Label(
+                copy,
+                text=f"{item['spoken']}  ->  {item['replacement']}",
+                font=("Segoe UI Semibold", 10), fg=self.colors["text"],
+                bg=self.colors["paper2"], anchor="w", justify="left",
+                wraplength=390,
+            ).pack(fill="x")
+            tk.Label(
+                copy,
+                text=f"Seen {int(item.get('matches', 1))} time(s)",
+                font=("Segoe UI", 8), fg=self.colors["muted"],
+                bg=self.colors["paper2"], anchor="w",
+            ).pack(fill="x", pady=(3, 0))
+            actions = tk.Frame(card, bg=self.colors["paper2"])
+            actions.pack(side="right", padx=10)
+            self._button(
+                actions, "Approve",
+                lambda correction_id=item["id"]: self.review_correction(
+                    correction_id, "approved"
+                ),
+                primary=True,
+            ).pack(side="left", padx=(0, 5))
+            self._button(
+                actions, "Reject",
+                lambda correction_id=item["id"]: self.review_correction(
+                    correction_id, "rejected"
+                ),
+                danger=True,
+            ).pack(side="left")
+
+        if approved:
+            learned = self._section("Approved memory")
+            for item in approved[:8]:
+                self._row(
+                    learned,
+                    f"{item['spoken']}  ->  {item['replacement']}",
+                    f"Confirmed {int(item.get('matches', 1))} time(s)",
+                )
+
+        lab = self._section(
+            "Personal Accuracy Lab",
+            "The same corrected recordings will test every engine with the same cleanup.",
+        )
+        remaining = max(0, 12 - len(corrected))
+        if remaining:
+            lab_message = f"Correct {remaining} more saved recording(s) to unlock a trustworthy comparison."
+        else:
+            lab_message = "Baseline ready. Candidate engines can now be compared without guessing."
+        tk.Label(
+            lab, text=lab_message, font=("Segoe UI Semibold", 9),
+            fg=self.colors["brand"], bg=self.colors["paper"],
+            anchor="w", justify="left", wraplength=560,
+        ).pack(fill="x", padx=16, pady=(4, 10))
+        for engine, state in (
+            ("Moonshine Base", "Current - installed"),
+            ("Parakeet", "Candidate - not downloaded"),
+            ("Whisper", "Candidate - benchmark after baseline"),
+        ):
+            self._row(lab, engine, state)
+        self._button(
+            lab, "Review history", lambda: self.show_page("history"), primary=True,
+        ).pack(anchor="e", padx=16, pady=(4, 14))
+
+        mode = self._section(
+            "Approval mode",
+            "Automatic watching is read-only, limited to the exact field Flow State just used, and stops after 12 seconds.",
+        )
+        self._row(
+            mode, "When a correction repeats", "Always review is the safest default.",
+            lambda host: self._choice(
+                host,
+                self.correction_mode_var,
+                list(CORRECTION_MODE_VALUES),
+                18,
+            ),
+        )
+        self._update_accuracy_badge(len(pending))
+
+    def review_correction(self, correction_id, status):
+        try:
+            changed = self.app.CORRECTIONS.set_status(correction_id, status)
+        except (OSError, ValueError) as exc:
+            self.flash("Correction review failed: " + str(exc))
+            return
+        self.flash("Correction approved" if status == "approved" else "Correction rejected")
+        if changed:
+            self.show_current()
     def _page_general(self):
         self._intro("Control how Flow State starts, listens, and inserts text.")
         section = self._section("Startup", "Keep Flow State ready without opening a full window.")
@@ -656,6 +853,15 @@ class Hub:
                 host, "Clear history...", self.clear_history, danger=True,
             ),
         )
+        self._row(
+            section, "Clear learned corrections",
+            "Permanently removes pending, approved, and rejected correction pairs.",
+            lambda host: self._button(
+                host, "Clear learned corrections...",
+                self.clear_corrections,
+                danger=True,
+            ),
+        )
         section = self._section("Network")
         self._row(
             section, "Offline processing",
@@ -680,6 +886,23 @@ class Hub:
             return
         self.flash(f"Removed {count} history item(s)")
         if self.current_page == "history":
+            self.show_current()
+
+    def clear_corrections(self):
+        if not messagebox.askyesno(
+            "Clear learned corrections",
+            "Permanently remove every learned correction pair? Saved History is not changed.",
+            parent=self.top,
+        ):
+            return
+        try:
+            count = self.app.CORRECTIONS.clear()
+        except (OSError, ValueError) as exc:
+            self.flash("Correction clear failed: " + str(exc))
+            return
+        self.flash(f"Removed {count} correction(s)")
+        self._update_accuracy_badge(0)
+        if self.current_page == "accuracy":
             self.show_current()
 
     def _page_dictionary(self):
@@ -1156,7 +1379,7 @@ class Hub:
         body = tk.Frame(section, bg=self.colors["paper"])
         body.pack(fill="both", expand=True, padx=16, pady=(0, 12))
         self.history_list = tk.Listbox(
-            body, width=38, height=15, font=("Segoe UI", 9),
+            body, width=28, height=15, font=("Segoe UI", 9),
             bg=self.colors["paper2"], fg=self.colors["text"], relief="flat",
             highlightthickness=1, highlightbackground=self.colors["border"],
             selectbackground=self.colors["border"], selectforeground=self.colors["text"],
@@ -1165,21 +1388,39 @@ class Hub:
         right = tk.Frame(body, bg=self.colors["paper"])
         right.pack(side="left", fill="both", expand=True, padx=(12, 0))
         self.history_text = tk.Text(
-            right, width=38, height=11, wrap="word", font=("Segoe UI", 9),
+            right, width=28, height=11, wrap="word", font=("Segoe UI", 9),
             bg=self.colors["paper2"], fg=self.colors["text"], relief="flat",
             highlightthickness=1, highlightbackground=self.colors["border"],
         )
         self.history_text.pack(fill="both", expand=True)
+        tk.Label(
+            right, text="CORRECTED LABEL", font=("Segoe UI Semibold", 8),
+            fg=self.colors["muted"], bg=self.colors["paper"], anchor="w",
+        ).pack(fill="x", pady=(8, 3))
+        self.history_correction = tk.Text(
+            right, width=28, height=4, wrap="word", font=("Segoe UI", 9),
+            bg=self.colors["paper2"], fg=self.colors["text"], relief="flat",
+            highlightthickness=1, highlightbackground=self.colors["border"],
+            insertbackground=self.colors["text"],
+        )
+        self.history_correction.pack(fill="x")
         buttons = tk.Frame(right, bg=self.colors["paper"])
         buttons.pack(fill="x", pady=(8, 0))
-        for label, command, danger in (
+        for index, (label, command, danger) in enumerate((
             ("Copy", self.copy_history, False),
             ("Play", self.play_history, False),
             ("Retry", self.retry_history, False),
             ("Reprocess", self.reprocess_history, False),
+            ("Save correction", self.save_history_correction, False),
             ("Delete", self.delete_history, True),
-        ):
-            self._button(buttons, label, command, danger=danger).pack(side="left", padx=(0, 6))
+        )):
+            self._button(buttons, label, command, danger=danger).grid(
+                row=index // 3,
+                column=index % 3,
+                sticky="w",
+                padx=(0, 6),
+                pady=(0, 5),
+            )
 
         def refresh(*_):
             query = search_var.get().lower()
@@ -1194,6 +1435,7 @@ class Hub:
                 text = " ".join(record.get("final", "").split())
                 self.history_list.insert("end", f"{stamp}  {text[:55]}")
             self.history_text.delete("1.0", "end")
+            self.history_correction.delete("1.0", "end")
 
         search_var.trace_add("write", refresh)
         self.history_list.bind("<<ListboxSelect>>", self.select_history)
@@ -1218,6 +1460,37 @@ class Hub:
         )
         self.history_text.delete("1.0", "end")
         self.history_text.insert("1.0", details)
+        self.history_correction.delete("1.0", "end")
+        self.history_correction.insert(
+            "1.0", record.get("corrected", "") or record.get("final", "")
+        )
+
+    def save_history_correction(self):
+        record = self._selected_history()
+        if not record:
+            return
+        corrected = self.history_correction.get("1.0", "end-1c").strip()
+        try:
+            saved = self.app.HISTORY.save_correction(record["id"], corrected)
+            if saved is None:
+                self.flash("History item is no longer available")
+                return
+            pairs = self.app.extract_correction_pairs(
+                record.get("final", ""), corrected
+            )
+            for spoken, replacement in pairs:
+                self.app.CORRECTIONS.observe(
+                    spoken,
+                    replacement,
+                    source_id="history:" + record["id"],
+                )
+        except (OSError, ValueError) as exc:
+            self.flash("Correction save failed: " + str(exc))
+            return
+        self.flash(
+            "Correction saved for review" if pairs else "Corrected label saved"
+        )
+        self.show_current()
 
     def copy_history(self):
         record = self._selected_history()
@@ -1476,6 +1749,12 @@ class Hub:
             "HISTORY_DAYS": retention,
             "THEME": self.theme_var.get(),
             "OPEN_HUB": bool(self.open_hub_var.get()),
+            "CORRECTION_MODE": CORRECTION_MODE_VALUES.get(
+                self.correction_mode_var.get()
+                if hasattr(self, "correction_mode_var")
+                else "Always review",
+                "always_review",
+            ),
         }
         try:
             self.app.save_settings(data)

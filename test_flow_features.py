@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 import wave
 from datetime import datetime, timedelta
@@ -8,12 +9,14 @@ from pathlib import Path
 import numpy as np
 
 from flow_features import (
+    CorrectionStore,
     DeliveryQueue,
     HistoryStore,
     RecoveryJournal,
     apply_vocabulary,
     apply_spoken_correction,
     choose_profile,
+    extract_correction_pairs,
     polish_text,
     read_wav,
     transform_selected_text,
@@ -127,6 +130,57 @@ class HistoryStoreTests(unittest.TestCase):
             self.assertEqual(store.find(record["id"])["final"], "Hello world.")
             self.assertEqual(store.stats()["words"], 2)
 
+    def test_correction_save_cannot_race_a_new_history_append(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(temp)
+            original = store.add(original="old", final="old")
+            entered = threading.Event()
+            release = threading.Event()
+            append_done = threading.Event()
+            real_read = store._read_unlocked
+
+            def paused_read(strict=False):
+                records = real_read(strict)
+                if strict:
+                    entered.set()
+                    release.wait(2)
+                return records
+
+            store._read_unlocked = paused_read
+            correction = threading.Thread(
+                target=store.save_correction,
+                args=(original["id"], "corrected"),
+            )
+            correction.start()
+            self.assertTrue(entered.wait(1))
+
+            def append():
+                store.add(original="new", final="new")
+                append_done.set()
+
+            writer = threading.Thread(target=append)
+            writer.start()
+            append_was_blocked = not append_done.wait(0.05)
+            release.set()
+            correction.join(2)
+            writer.join(2)
+            self.assertTrue(append_was_blocked)
+            self.assertFalse(correction.is_alive())
+            self.assertFalse(writer.is_alive())
+            records = store.read()
+            self.assertEqual({record["final"] for record in records}, {"old", "new"})
+            self.assertEqual(store.find(original["id"])["corrected"], "corrected")
+
+    def test_correction_save_refuses_to_drop_malformed_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(temp)
+            saved = store.add(original="keep", final="keep")
+            with open(store.path, "a", encoding="utf-8") as out:
+                out.write("not json\n")
+            original_bytes = store.path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "original file kept"):
+                store.save_correction(saved["id"], "corrected")
+            self.assertEqual(store.path.read_bytes(), original_bytes)
     def test_delete_never_unlinks_audio_outside_recordings(self):
         """BITE-PROOF: removing _safe_audio_path containment unlinks outside.wav."""
         with tempfile.TemporaryDirectory() as temp:
@@ -134,7 +188,7 @@ class HistoryStoreTests(unittest.TestCase):
             outside = root / "outside.wav"
             outside.write_bytes(b"keep")
             store = HistoryStore(root / "data")
-            store.path.parent.mkdir(parents=True)
+            store.path.parent.mkdir(parents=True, exist_ok=True)
             record = {
                 "id": "unsafe",
                 "timestamp": datetime.now().isoformat(),
@@ -159,6 +213,92 @@ class HistoryStoreTests(unittest.TestCase):
             self.assertEqual(store.prune(30), 1)
             self.assertFalse(Path(old["audio_path"]).exists())
 
+
+class CorrectionLearningTests(unittest.TestCase):
+    def test_extracts_only_small_replacements_inside_inserted_range(self):
+        before = "Old note. floor state ships today. Unrelated tail."
+        after = "Rewritten note. Flow State ships today. Different tail."
+        start = before.index("floor state")
+        end = start + len("floor state ships today.")
+        self.assertEqual(
+            extract_correction_pairs(before, after, start, end),
+            [("floor state", "Flow State")],
+        )
+        crossing_before = "memo floor state"
+        crossing_after = "note Flow State"
+        trusted_start = crossing_before.index("floor state")
+        self.assertEqual(
+            extract_correction_pairs(
+                crossing_before,
+                crossing_after,
+                trusted_start,
+                len(crossing_before),
+            ),
+            [],
+        )
+
+    def test_pending_pair_cannot_change_text_until_approved(self):
+        """BITE-PROOF: removing approved-only filtering makes the first assertion fail."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = CorrectionStore(temp)
+            item = store.observe("floor state", "Flow State", source_id="history-1")
+            self.assertEqual(store.apply("open floor state"), "open floor state")
+            self.assertTrue(store.set_status(item["id"], "approved"))
+            self.assertEqual(store.apply("open floor state"), "open Flow State")
+            self.assertEqual(store.hotwords(), "Flow State")
+
+    def test_unicode_case_variant_outside_rule_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = CorrectionStore(temp)
+            item = store.observe("i", "eye")
+            store.set_status(item["id"], "approved")
+            self.assertEqual(store.apply("i ı"), "eye ı")
+
+    def test_repeated_source_does_not_inflate_match_count(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = CorrectionStore(temp)
+            first = store.observe("pair a key", "Parakeet", source_id="watch-1")
+            repeated = store.observe("pair a key", "Parakeet", source_id="watch-1")
+            second = store.observe("pair a key", "Parakeet", source_id="history-2")
+            self.assertEqual(first["matches"], 1)
+            self.assertEqual(repeated["matches"], 1)
+            self.assertEqual(second["matches"], 2)
+
+    def test_corrupt_store_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = CorrectionStore(temp)
+            store.path.parent.mkdir(parents=True, exist_ok=True)
+            store.path.write_text("not json", encoding="utf-8")
+            self.assertEqual(store.read(), [])
+            self.assertEqual(store.apply("floor state"), "floor state")
+            with self.assertRaisesRegex(ValueError, "original file kept"):
+                store.observe("floor state", "Flow State")
+            self.assertEqual(store.path.read_text(encoding="utf-8"), "not json")
+
+    def test_approved_rules_do_not_cascade(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = CorrectionStore(temp)
+            alpha = store.observe("alpha", "beta")
+            beta = store.observe("beta", "gamma")
+            store.set_status(alpha["id"], "approved")
+            store.set_status(beta["id"], "approved")
+            self.assertEqual(store.apply("alpha beta"), "beta gamma")
+    def test_clear_removes_only_correction_memory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = CorrectionStore(temp)
+            store.observe("floor state", "Flow State")
+            store.observe("pair a key", "Parakeet")
+            self.assertEqual(store.clear(), 2)
+            self.assertEqual(store.read(), [])
+    def test_history_correction_preserves_delivered_and_original_text(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = HistoryStore(temp)
+            saved = store.add(original="floor state", final="Floor state.")
+            corrected = store.save_correction(saved["id"], "Flow State.")
+            self.assertEqual(corrected["original"], "floor state")
+            self.assertEqual(corrected["final"], "Floor state.")
+            self.assertEqual(corrected["corrected"], "Flow State.")
+            self.assertTrue(corrected["corrected_at"])
 
 class RecoveryJournalTests(unittest.TestCase):
     def test_partial_text_survives_as_an_orphan_session(self):
@@ -232,6 +372,47 @@ class DeliveryQueueTests(unittest.TestCase):
             self.assertEqual(record["target"]["process"], "notepad.exe")
             self.assertTrue(queue.complete(record["id"]))
             self.assertEqual(queue.read(), [])
+
+    def test_complete_cannot_drop_a_concurrent_append(self):
+        with tempfile.TemporaryDirectory() as temp:
+            queue = DeliveryQueue(temp)
+            original = queue.add("First")
+            entered = threading.Event()
+            release = threading.Event()
+            append_done = threading.Event()
+            real_read = queue.read
+
+            def paused_read():
+                records = real_read()
+                entered.set()
+                release.wait(2)
+                return records
+
+            queue.read = paused_read
+            cleanup = threading.Thread(
+                target=queue.complete,
+                args=(original["id"],),
+            )
+            cleanup.start()
+            self.assertTrue(entered.wait(1))
+
+            def append():
+                queue.add("Second")
+                append_done.set()
+
+            writer = threading.Thread(target=append)
+            writer.start()
+            append_was_blocked = not append_done.wait(0.05)
+            release.set()
+            cleanup.join(2)
+            writer.join(2)
+            self.assertTrue(append_was_blocked)
+            self.assertFalse(cleanup.is_alive())
+            self.assertFalse(writer.is_alive())
+            self.assertEqual(
+                [record["text"] for record in queue.read()],
+                ["Second"],
+            )
 
     def test_invalid_id_cannot_change_delivery_queue(self):
         with tempfile.TemporaryDirectory() as temp:

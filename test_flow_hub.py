@@ -9,9 +9,27 @@ import flow
 from flow_hub import Hub
 
 
+def cancel_tk_callbacks(root, owner):
+    for callback_id in root.tk.call("after", "info"):
+        try:
+            owner.after_cancel(callback_id)
+        except tk.TclError:
+            pass
+
 class FakeHistory:
+    def __init__(self):
+        self.records = []
+
     def read(self):
-        return []
+        return list(self.records)
+
+    def save_correction(self, record_id, corrected):
+        record = next((item for item in self.records if item["id"] == record_id), None)
+        if record is None:
+            return None
+        record["corrected"] = corrected
+        record["corrected_at"] = "2026-07-14T12:00:00"
+        return dict(record)
 
     def stats(self, *_args):
         return {
@@ -36,6 +54,43 @@ class FakeHistory:
     def delete(self, _record_id):
         return False
 
+
+class FakeCorrections:
+    def __init__(self):
+        self.records = []
+
+    def read(self, status=None):
+        records = list(self.records)
+        return [item for item in records if item["status"] == status] if status else records
+
+    def stats(self):
+        return {
+            "pending": sum(item["status"] == "pending" for item in self.records),
+            "approved": sum(item["status"] == "approved" for item in self.records),
+            "rejected": sum(item["status"] == "rejected" for item in self.records),
+        }
+
+    def observe(self, spoken, replacement, **_kwargs):
+        item = {
+            "id": f"pair-{len(self.records) + 1}",
+            "spoken": spoken,
+            "replacement": replacement,
+            "status": "pending",
+            "matches": 1,
+        }
+        self.records.append(item)
+        return item
+
+    def clear(self):
+        count = len(self.records)
+        self.records = []
+        return count
+    def set_status(self, correction_id, status):
+        item = next((item for item in self.records if item["id"] == correction_id), None)
+        if item is None:
+            return False
+        item["status"] = status
+        return True
 
 class FakeRecovery:
     def __init__(self):
@@ -103,27 +158,30 @@ def buttons(widget):
 
 class HubControlTests(unittest.TestCase):
     PAGE_BUTTONS = {
-        "history": {"Copy", "Play", "Retry", "Reprocess", "Delete"},
+        "history": {"Copy", "Play", "Retry", "Reprocess", "Save correction", "Delete"},
         "recovery": {"Copy text", "Retry delivery", "Remove..."},
         "delivery": {"Copy text", "Retry delivery", "Remove..."},
         "dictionary": {"Add word", "Add", "Delete"},
+        "accuracy": {"Review history"},
         "general": set(),
         "dictation": set(),
         "audio": {"Test microphone"},
         "appearance": set(),
-        "privacy": {"Clear history..."},
+        "privacy": {"Clear history...", "Clear learned corrections..."},
         "files": {"Choose WAV..."},
         "stats": set(),
     }
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.root = tk.Tk()
         self.root.withdraw()
         self.patches = [
             mock.patch.object(flow, "BASE_DIR", self.temp.name),
             mock.patch.object(flow, "DICT", SimpleNamespace(path=str(Path(self.temp.name) / "dictionary.txt"))),
             mock.patch.object(flow, "HISTORY", FakeHistory()),
+            mock.patch.object(flow, "CORRECTIONS", FakeCorrections()),
             mock.patch.object(flow, "RECOVERY", FakeRecovery()),
             mock.patch.object(flow, "DELIVERY", FakeDelivery()),
             mock.patch.object(flow, "get_autostart", return_value=False),
@@ -133,6 +191,7 @@ class HubControlTests(unittest.TestCase):
             mock.patch.object(flow, "find_delivery_target", return_value=42),
             mock.patch.object(Hub, "test_microphone"),
             mock.patch.object(Hub, "clear_history"),
+            mock.patch.object(Hub, "clear_corrections"),
             mock.patch.object(Hub, "choose_wav"),
             mock.patch.object(Hub, "copy_recovery"),
             mock.patch.object(Hub, "retry_recovery"),
@@ -143,15 +202,12 @@ class HubControlTests(unittest.TestCase):
         ]
         for patcher in self.patches:
             patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.root.destroy)
         self.hub = Hub(self.root, flow)
+        self.addCleanup(cancel_tk_callbacks, self.root, self.hub.top)
         self.root.update_idletasks()
 
-    def tearDown(self):
-        self.hub.top.destroy()
-        self.root.destroy()
-        for patcher in reversed(self.patches):
-            patcher.stop()
-        self.temp.cleanup()
 
     def test_every_page_renders_and_every_command_button_invokes(self):
         for page, expected in self.PAGE_BUTTONS.items():
@@ -173,9 +229,131 @@ class HubControlTests(unittest.TestCase):
         saved = flow.save_settings.call_args.args[0]
         self.assertEqual(saved["UNDO_HOTKEY"], flow.UNDO_HOTKEY)
         self.assertEqual(saved["REDO_HOTKEY"], flow.REDO_HOTKEY)
+        self.assertEqual(saved["CORRECTION_MODE"], "always_review")
         flow.set_autostart.assert_called_once()
         footer["Reset page"].invoke()
 
+    def test_history_correction_creates_reviewable_pair_without_overwriting_final(self):
+        flow.HISTORY.records = [{
+            "id": "record-1",
+            "timestamp": "2026-07-14T12:00:00",
+            "original": "floor state is ready",
+            "final": "Floor state is ready.",
+            "audio_path": "",
+        }]
+        self.hub.show_page("history")
+        self.hub.history_list.selection_set(0)
+        self.hub.select_history()
+        self.hub.history_correction.delete("1.0", "end")
+        self.hub.history_correction.insert("1.0", "Flow State is ready.")
+        self.hub.save_history_correction()
+
+        saved = flow.HISTORY.records[0]
+        self.assertEqual(saved["final"], "Floor state is ready.")
+        self.assertEqual(saved["corrected"], "Flow State is ready.")
+        self.assertEqual(flow.CORRECTIONS.records[0]["spoken"], "Floor state")
+        self.assertEqual(flow.CORRECTIONS.records[0]["replacement"], "Flow State")
+        self.assertEqual(flow.CORRECTIONS.records[0]["status"], "pending")
+
+    def test_repeat_mode_keeps_first_observation_hidden_and_pending(self):
+        flow.CORRECTIONS.records = [{
+            "id": "pair-1",
+            "spoken": "pair a key",
+            "replacement": "Parakeet",
+            "status": "pending",
+            "matches": 1,
+        }]
+        self.hub.correction_mode_var.set("Review after 2 matches")
+        self.hub.show_page("accuracy")
+        self.root.update_idletasks()
+        labels = {button.cget("text") for button in buttons(self.hub.page)}
+        self.assertNotIn("Approve", labels)
+        self.assertEqual(flow.CORRECTIONS.records[0]["status"], "pending")
+    def test_accuracy_page_approves_pending_pair(self):
+        flow.CORRECTIONS.records = [{
+            "id": "pair-1",
+            "spoken": "pair a key",
+            "replacement": "Parakeet",
+            "status": "pending",
+            "matches": 2,
+        }]
+        self.hub.show_page("accuracy")
+        self.root.update_idletasks()
+        approve = next(
+            button for button in buttons(self.hub.page)
+            if button.cget("text") == "Approve"
+        )
+        approve.invoke()
+        self.assertEqual(flow.CORRECTIONS.records[0]["status"], "approved")
+    def test_history_actions_fit_supported_window_widths(self):
+        for geometry in ("800x560", "940x680"):
+            with self.subTest(geometry=geometry):
+                self.hub.top.geometry(geometry)
+                self.hub.show_page("history")
+                self.hub.top.update()
+                left = self.hub.top.winfo_rootx()
+                right = left + self.hub.top.winfo_width()
+                action_buttons = [
+                    button for button in buttons(self.hub.page)
+                    if button.cget("text") in self.PAGE_BUTTONS["history"]
+                ]
+                self.assertEqual(len(action_buttons), 6)
+                for button in action_buttons:
+                    self.assertGreaterEqual(button.winfo_rootx(), left)
+                    self.assertLessEqual(
+                        button.winfo_rootx() + button.winfo_width(), right
+                    )
+
+    def test_native_standard_edit_snapshot_and_password_exclusion(self):
+        user32 = flow.ctypes.windll.user32
+        create = user32.CreateWindowExW
+        create.argtypes = [
+            flow.wintypes.DWORD,
+            flow.wintypes.LPCWSTR,
+            flow.wintypes.LPCWSTR,
+            flow.wintypes.DWORD,
+            flow.ctypes.c_int,
+            flow.ctypes.c_int,
+            flow.ctypes.c_int,
+            flow.ctypes.c_int,
+            flow.wintypes.HWND,
+            flow.wintypes.HMENU,
+            flow.wintypes.HINSTANCE,
+            flow.wintypes.LPVOID,
+        ]
+        create.restype = flow.wintypes.HWND
+        self.hub.top.deiconify()
+        self.hub.top.lift()
+        self.hub.top.update()
+        parent = self.hub.top.winfo_id()
+        base_style = 0x40000000 | 0x10000000 | 0x00010000 | 0x00800000
+
+        def make_edit(style):
+            control = int(create(
+                0, "EDIT", "abc", base_style | style,
+                20, 20, 180, 28, parent, 0, 0, None,
+            ) or 0)
+            self.assertTrue(control)
+            user32.SetForegroundWindow(parent)
+            user32.SetFocus(control)
+            flow._send_message_timeout(control, 0x00B1, 3, 3)
+            self.hub.top.update()
+            return control
+
+        edit = make_edit(0x0080)
+        try:
+            snapshot = flow._edit_snapshot(parent, edit)
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot["text"], "abc")
+            self.assertEqual(snapshot["selection_end"], 3)
+        finally:
+            user32.DestroyWindow(edit)
+
+        password = make_edit(0x0020)
+        try:
+            self.assertIsNone(flow._edit_snapshot(parent, password))
+        finally:
+            user32.DestroyWindow(password)
     def test_reprocess_lab_copy_and_back_buttons_invoke(self):
         record = {
             "id": "saved-audio",
@@ -231,6 +409,7 @@ class HubControlTests(unittest.TestCase):
 class RecoveryInboxBehaviorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.root = tk.Tk()
         self.root.withdraw()
         self.recovery = FakeRecovery()
@@ -241,22 +420,20 @@ class RecoveryInboxBehaviorTests(unittest.TestCase):
                 SimpleNamespace(path=str(Path(self.temp.name) / "dictionary.txt")),
             ),
             mock.patch.object(flow, "HISTORY", FakeHistory()),
+            mock.patch.object(flow, "CORRECTIONS", FakeCorrections()),
             mock.patch.object(flow, "RECOVERY", self.recovery),
             mock.patch.object(flow, "get_autostart", return_value=False),
             mock.patch.object(flow, "available_microphones", return_value=[]),
         ]
         for patcher in self.patches:
             patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.root.destroy)
         self.hub = Hub(self.root, flow)
+        self.addCleanup(cancel_tk_callbacks, self.root, self.hub.top)
         self.hub.show_page("recovery")
         self.root.update_idletasks()
 
-    def tearDown(self):
-        self.hub.top.destroy()
-        self.root.destroy()
-        for patcher in reversed(self.patches):
-            patcher.stop()
-        self.temp.cleanup()
 
     def test_copy_uses_selected_recovered_text(self):
         with mock.patch("flow_hub.pyperclip.copy") as copy:
@@ -348,6 +525,7 @@ class RecoveryInboxBehaviorTests(unittest.TestCase):
 class DeliveryQueueBehaviorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.root = tk.Tk()
         self.root.withdraw()
         self.delivery = FakeDelivery()
@@ -358,6 +536,7 @@ class DeliveryQueueBehaviorTests(unittest.TestCase):
                 SimpleNamespace(path=str(Path(self.temp.name) / "dictionary.txt")),
             ),
             mock.patch.object(flow, "HISTORY", FakeHistory()),
+            mock.patch.object(flow, "CORRECTIONS", FakeCorrections()),
             mock.patch.object(flow, "RECOVERY", FakeRecovery()),
             mock.patch.object(flow, "DELIVERY", self.delivery),
             mock.patch.object(flow, "get_autostart", return_value=False),
@@ -366,16 +545,13 @@ class DeliveryQueueBehaviorTests(unittest.TestCase):
         ]
         for patcher in self.patches:
             patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.root.destroy)
         self.hub = Hub(self.root, flow)
+        self.addCleanup(cancel_tk_callbacks, self.root, self.hub.top)
         self.hub.show_page("delivery")
         self.root.update_idletasks()
 
-    def tearDown(self):
-        self.hub.top.destroy()
-        self.root.destroy()
-        for patcher in reversed(self.patches):
-            patcher.stop()
-        self.temp.cleanup()
 
     def test_copy_uses_selected_queued_text(self):
         with mock.patch("flow_hub.pyperclip.copy") as copy:
