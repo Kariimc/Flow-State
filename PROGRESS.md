@@ -1,7 +1,7 @@
 # Flow State - Progress
 
-**Updated:** 2026-07-13
-**Last verified:** the exact eleven-file ten-feature reliability bundle is now integrated into the live `perf/reliability-baseline` working tree. The disposable candidate passed all 96 tests in 24.555s; the live tree passed the same 96 tests in 41.667s, including all 14 native Tk page/button tests, and all 8 Python/benchmark files compiled. `git diff --check` passed. Hash checks prove `run.bat`, `run.vbs`, settings, Dictionary, vocabulary, History, and recordings were unchanged. The actual integrated dark-mode Hub opened, reached Ready, retained the approved muted-indigo palette, exposed Delivery Queue, and remained responsive. A guarded real-Notepad smoke inserted and saved the exact expected payload, closed only its owned window, and measured 293.7 ms stop-to-cursor: 245.1 ms recognition plus 48.7 ms native delivery. The official Base-versus-Tiny comparison remains Base 145.6 ms median / 310.7 ms p95 / 377.5 ms max and Tiny 81.3 / 194.6 / 212.7 ms across ten recordings x five rounds; Tiny was exact on only 2/5 complete clips versus Base's 5/5, so Base remains default.
+**Updated:** 2026-07-14
+**Last verified:** Kariim gave fresh merge approval and the complete reliability branch plus the waveform text correction landed on `main` at merge commit `f13ab0a`. The waveform fix is commit `ed685f5`: status text no longer uses Tk's wrapping width, and is trimmed by the real Segoe UI pixel width so it stays on one line inside the 26px pill. Its bite test failed before the method existed, then the exact merged tree passed all 97 tests in 47.347s and all 8 Python/benchmark files compiled. A native Tk render measured the status text at `(30, 7, 176, 20)` inside its background `(24, 3, 186, 23)`. The laptop checkout is on `main`; its `flow.py` SHA-256 matches the tested merge (`4010552386AE46DAEEF81B807A709A9CFB719BA614ED188698E11BF5F7AC46FB`). The no-install browser comparison measured Flow State's earlier 293.7ms native Notepad result against Wispr's 991ms browser-demo median and Superwhisper's 2601ms browser-tool median; this is browser-only evidence and is not a desktop-app superiority claim. Aqua was excluded because its web sandbox requires a held Space key that the available browser control could not reproduce fairly. Windows Microphone Array was restored as default and temporary Stereo Mix was disabled after testing.
 
 ## Where We Are
 
@@ -126,18 +126,10 @@ generic loader was replaced with a dashboard-shaped local-record skeleton.
 
 ## Do Next
 
-Commit and push the integrated bundle, open/check its pull request, and update
-Relay. Then run the remaining apples-to-apples competitor performance audit and
-revalidate each documented top-three feature gap before making public speed or
-exclusivity claims. Merge to `main` only after Kariim gives a fresh explicit yes.
-
-The 2026-07-12 direct copy attempt was denied on the first file
-(`C:\Users\Kariim\flow-state\flow.py`). Hash and git checks prove no partial
-copy occurred. Claude later committed only the silent-launch changes to
-`run.bat` and new `run.vbs` as `721747b`; the live branch and origin are clean
-at that commit. Preserve both launcher files during the eventual reliability
-apply. The complete source bundle remains under this workspace's
-`work/delivery-queue` directory.
+Restart Flow State once so the running process loads the new `main` files, then
+visually confirm one long overlay notice. Do not install competitor apps unless
+Kariim later chooses a true desktop-to-desktop benchmark; the completed
+no-install browser comparison must stay labeled as browser-only evidence.
 
 ## Don't Forget
 
@@ -215,3 +207,4 @@ apply. The complete source bundle remains under this workspace's
 - 2026-07-13 - Applied the approved muted-indigo palette narrowly to the live Hub and overlay after the restart exposed that it had only existed in prototypes. The real dark-mode Hub was visually verified, and the live branch passed 31 tests plus compile and whitespace checks.
 - 2026-07-13 - Integrated the exact verified eleven-file reliability bundle without rewriting it. Protected launcher and user-data hashes stayed identical; candidate and live 96-test suites passed; the integrated Hub reached Ready; and guarded Notepad insertion was exact.
 - 2026-07-13 - Revalidated the ten differentiators against current official competitor documentation. Wispr, Aqua, and Superwhisper now ship adjacent retry, recent-audio rerun, reprocess, and clipboard features, so the evidence names that overlap and scopes each gap to Flow State's complete guarded behavior. None of the three competitor apps is installed locally; an honest responsiveness ranking still requires a same-machine competitor run rather than vendor WPM claims.
+- 2026-07-14 - Merged the complete reliability branch to `main` only after Kariim's fresh approval. Replaced character-count overlay truncation with measured Segoe UI pixel fitting and removed Tk wrapping; the exact merge passed 97 tests, compile, and native Tk bounds verification.
