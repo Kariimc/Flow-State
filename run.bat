@@ -1,4 +1,8 @@
 @echo off
 cd /d "%~dp0"
-".venv\Scripts\python.exe" flow.py
-pause
+rem launch windowless via pythonw (no console, no pause) — the bat closes at once
+if exist ".venv\Scripts\pythonw.exe" (
+  start "" ".venv\Scripts\pythonw.exe" flow.py
+) else (
+  start "" ".venv\Scripts\python.exe" flow.py
+)
