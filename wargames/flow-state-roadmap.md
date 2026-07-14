@@ -3,6 +3,10 @@
 Mission: ship the approved Hub redesign and the locally feasible competitor
 roadmap without regressing the existing offline dictation path.
 
+Status: completed and merged to `main`. This file preserves the original plan
+and its old baseline commit; current architecture and verification live in
+`HANDOFF.md` and `PROGRESS.md`.
+
 ## Moves
 
 1. Preserve the baseline.

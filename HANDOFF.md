@@ -1,14 +1,15 @@
 # Flow State — Engineering Handoff
 
 A local, offline voice-dictation app for Windows in the spirit of Wispr Flow.
-Hold or tap a hotkey, speak, and the text is inserted into whatever window has
-focus. No audio ever leaves the machine. Single file: `flow.py` (~1,400 lines,
-standard-library UI, no framework).
+Hold or tap a hotkey, speak, and the text is inserted into the captured target
+window. No audio leaves the machine. The app uses three production modules:
+`flow.py` for capture/delivery, `flow_features.py` for durable data and text
+features, and `flow_hub.py` for the standard-library Tk UI.
 
-Status: working and verified end-to-end on the target machine. Built and tested
-on an Intel Pentium Gold 5405U (2 cores, no AVX2, 3.8 GB RAM, no usable GPU) —
-the whole design is shaped by that constraint, so it runs comfortably on far
-better hardware.
+Status: the reliability bundle and waveform text fix are merged to `main`.
+The exact merged tree passed 97 tests, including 14 native Tk tests, and all
+eight Python/test/benchmark files compiled. `PROGRESS.md` records the current
+commit, live-process check, measurements, and any next action.
 
 ---
 
@@ -30,16 +31,20 @@ Use it: hold or tap **Ctrl+Win**, speak, release. Text appears at your cursor.
 - **Tap** Ctrl+Win = hands-free; stops after ~1.5 s of silence, or tap again.
 - **Ctrl+Win+Space** = continuous mode; mic stays open, text streams in until
   you press it again.
+- **Ctrl+Win+Shift+Space** = pause or resume the same continuous session.
 - **Esc twice** quickly = quit.
 
-The desktop shortcut ("Flow State") opens the **Hub** (History, Dictionary,
-Options). The app also lives in the system tray and starts with Windows.
+The desktop shortcut opens the **Hub**. Its navigation is History, Recovery,
+Delivery queue, Dictionary, General, Dictation, Audio & mic, Appearance,
+Privacy, Files & meetings, and Statistics. The app also lives in the system
+tray and can start with Windows when the Hub's autostart setting is enabled.
 
 ---
 
 ## 2. Why these technology choices (the hardware story)
 
-The target CPU has **no AVX2**. This single fact drove the stack:
+The original target CPU had **no AVX2**. This constraint drove the stack even
+though the current laptop has more headroom:
 
 - **faster-whisper / CTranslate2** falls back to a generic SSE path without AVX2.
   Measured here: **~35 s to transcribe 4 s of audio** with `base`. Unusable.
@@ -108,15 +113,17 @@ VAD-auto-stop can't both transcribe the same recording.
 | Feature | Where |
 |---|---|
 | ASR engines (Moonshine default, Whisper fallback) | `MoonshineEngine`, `WhisperEngine`, `load_engine` |
-| Rule cleanup (fillers, spoken punctuation) | `clean_text` |
+| Rule cleanup, profiles, corrections, vocabulary | `flow_features.py`, `finish_text` |
 | Personal dictionary (live-reload replacements) | `Dictionary`, `read_rules`, `write_rules` |
+| History, recordings, recovery, delivery queue | `HistoryStore`, `RecoveryJournal`, `DeliveryQueue` |
 | Incremental pipeline | `audio_callback`, `vad_worker`, `transcriber_worker` |
 | Long-audio fallback split | `split_audio` |
-| Hold / tap / continuous logic | `on_key_down/up`, `toggle_continuous`, `end_continuous` |
-| Text insertion (paste + restore, or type) | `inject` |
+| Hold / tap / continuous / pause logic | `on_key_down/up`, `toggle_continuous`, `toggle_pause` |
+| Focus/typing guards and delivery | `protect_delivery`, `deliver_text` |
+| Clipboard Shield, scoped undo/redo | `inject`, `undo_last_insertion`, `redo_last_insertion` |
 | Waveform overlay (6 octave curves) | `Overlay` |
-| Hub (history/dictionary/options) | `Hub` |
-| Autostart + single-instance + desktop icon | `set_autostart`, `ipc_server/send`, `make_icon` |
+| Hub pages and controls | `flow_hub.Hub` |
+| Autostart + single instance + desktop/tray icons | `set_autostart`, `ipc_server/send`, `make_icon` |
 | Settings persistence | `load_settings`, `save_settings`, `settings.json` |
 
 ---
@@ -124,13 +131,10 @@ VAD-auto-stop can't both transcribe the same recording.
 ## 4. Settings
 
 Defaults live in the config block at the top of `flow.py`. `settings.json`
-(written by the Hub's **Options** tab) overrides them at startup via
-`load_settings()`. Keys in `TWEAKABLE`: `HOTKEY`, `CONTINUOUS_HOTKEY`, `ENGINE`,
-`INJECTION`, `VERBATIM`, `AUTO_STOP`, `MAX_RECORD`, `IDLE_FADE`.
-
-`VERBATIM`, `INJECTION`, `AUTO_STOP`, `IDLE_FADE`, `MAX_RECORD` are read at
-use-time, so Options changes apply immediately. `ENGINE` and `HOTKEY` are read
-at startup, so they need a restart.
+(written by the Hub settings pages) overrides them through `load_settings()`.
+`TWEAKABLE` covers the six shortcuts, engine/injection, cleanup/profile,
+microphone and cues, audio/history retention, theme, and startup Hub behavior.
+The Hub marks changes that need a restart; use-time values apply immediately.
 
 ---
 
@@ -153,8 +157,10 @@ so all six stay visible. Drawn once at init; the animation only calls
 earlier version choppy). ~33 fps via `after(30, ...)`. The pill fades out after
 `IDLE_FADE` seconds and never steals keyboard focus (WS_EX_NOACTIVATE).
 
-**Icon** (`make_icon`): the same three-curve waveform on paper, generated to
-`models/flow.ico`, used by the desktop shortcut and the Hub window.
+**Icons** (`make_icon`): `models/flow.ico` is the graph-paper waveform desktop
+and Hub icon with a foreground F. `models/flow-tray.ico` is a separate gray
+microphone with the same F fitted inside its capsule. Tray state tinting derives
+from that microphone artwork.
 
 ---
 
@@ -190,9 +196,15 @@ earlier version choppy). ~33 fps via `after(30, ...)`. The pill fades out after
 
 ## 7. Testing approach
 
-No formal test suite; verification is done by driving the real components and
-screenshotting the real UI (the app is inherently GUI + audio + global hooks).
-Patterns used during development, reproduce them when changing things:
+The formal suite is `test_flow_features.py`, `test_flow_hub.py`, and
+`test_flow_runtime.py`. Run all 97 tests in one process from the repository root:
+
+```powershell
+.venv\Scripts\python.exe -m unittest -v
+```
+
+The suite drives pure features, runtime control paths, and native Tk pages.
+Runtime/UI changes also need the focused real checks below:
 
 - **Cleanup/dictionary**: call `clean_text` / `Dictionary.apply` on strings and
   assert exact output.
@@ -210,30 +222,37 @@ Patterns used during development, reproduce them when changing things:
 
 ## 8. Roadmap (what's next)
 
-Table-stakes and the top community asks are done: offline, private, low-RAM,
-verbatim mode, dictionary, history, hold/tap/continuous, tray, autostart. From
-RESEARCH.md §6, remaining ideas in rough priority:
+The approved Hub roadmap and all ten reliability differentiators are shipped.
+That includes profiles, file transcription, statistics, crash recovery,
+guarded delivery, pause/resume, reprocessing, scoped undo/redo, and the local
+Reliability dashboard. No item from that bundle remains agent-actionable.
 
-1. **Per-app tone profiles** — casual in chat, formal in email, by active window.
-2. **Local LLM "deep clean" mode** — optional, for capable hardware; slot into
-   the `clean_text` seam.
-3. **Streaming partial text** in continuous mode (show words mid-utterance).
-4. **Usage stats** in the Hub (words/day, average transcribe speed).
-5. **Packaging** — a Nuitka/Inno installer so it runs without the Python setup.
+Future ideas require a new decision rather than silent implementation:
+
+1. **Local LLM deep clean** on hardware that can carry the added delay.
+2. **True word-level streaming preview**, beyond current utterance delivery.
+3. **Packaging** with an installer so Python setup is not required.
+4. **Same-machine competitor testing**, only if Kariim chooses desktop installs.
 
 ---
 
 ## 9. File inventory
 
 Committed:
-- `flow.py` — the entire app.
+- `flow.py` — capture, engines, overlay, delivery, tray, and runtime wiring.
+- `flow_features.py` — text transforms and durable History/Recovery/Delivery stores.
+- `flow_hub.py` — the full Hub UI.
+- `test_flow_features.py`, `test_flow_hub.py`, `test_flow_runtime.py` — 97 tests.
+- `benchmark_flow.py`, `native_delivery_benchmark.py` — repeatable performance probes.
 - `run.bat` — launches it in the venv.
+- `run.vbs` — launches it without a console window.
 - `setup.ps1` — creates the venv and downloads models.
 - `requirements.txt` — Python deps.
-- `dictionary.txt` — template (personal rules are git-ignored via runtime files).
+- `dictionary.txt`, `vocabulary.txt` — tracked starter content; review personal
+  entries before pushing.
 - `README.md` — user guide. `RESEARCH.md` — the research. `PROGRESS.md` — working
   log. `HANDOFF.md` — this file.
 
 Not committed (see `.gitignore`): `.venv/`, `models/*` (275 MB of models,
-downloaded by setup + generated cues/icon), `history.txt`, `settings.json`,
-`overlay_pos.txt`, `__pycache__/`, `.claude/`.
+downloaded by setup + generated cues/icons), `history.txt`, `history.jsonl`,
+`settings.json`, `overlay_pos.txt`, `data/`, `__pycache__/`, `.claude/`.

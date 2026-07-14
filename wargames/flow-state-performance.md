@@ -3,6 +3,9 @@
 Mission: make Flow State measurably faster and more dependable, then ship ten
 evidence-backed differentiators without weakening its local-first core.
 
+Status: completed and merged to `main` in `f13ab0a`. This file is the preserved
+pre-build plan; current evidence is in `DIFFERENTIATORS.md` and `PROGRESS.md`.
+
 ## Moves
 
 1. Capture a repeatable baseline for import, engine load, warm inference,

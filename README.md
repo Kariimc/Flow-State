@@ -15,9 +15,10 @@ once. After that, use `run.bat` or the Desktop shortcut.
 
 ## Run It
 
-It starts by itself when Windows boots. The **Flow State** Desktop icon opens
-the Hub: history, recovery, dictionary, shortcuts, dictation behavior, audio, appearance,
-privacy, file transcription, and stats.
+Flow State can start with Windows when **Start with Windows** is enabled in the
+Hub. The **Flow State** Desktop icon opens History, Recovery, Delivery queue,
+Dictionary, shortcuts, dictation behavior, audio, appearance, privacy, file
+transcription, and statistics.
 
 1. Double-click `run.bat`, or open the Desktop shortcut.
 2. Wait until Flow State says **Ready**.
@@ -129,6 +130,13 @@ capture is available when Windows exposes a Stereo Mix input device.
 
 ## Performance Check
 
+The current `main` suite contains 97 tests, including 14 native Tk page/button
+tests. Run it in one process before and after a code change:
+
+```powershell
+.venv\Scripts\python.exe -m unittest -v
+```
+
 Run the repeatable local benchmark after changing startup, text cleanup,
 history, or the overlay:
 
@@ -169,6 +177,11 @@ Paste delivery returns immediately after `Ctrl+V`. Clipboard Shield waits 1.2
 seconds on a background worker before restoring the original value, and skips
 that restore if a person or another app changed the clipboard. Rapid Flow pastes
 share the same original value instead of restoring an older transcript.
+
+The completed no-install comparison used Wispr and Superwhisper browser tools,
+not their desktop apps. Those numbers are browser-only evidence and are not a
+desktop-app speed ranking. Aqua was excluded because the browser control could
+not reproduce its held-Space interaction fairly.
 
 ## Reinstall From Scratch
 
