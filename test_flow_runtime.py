@@ -1265,21 +1265,37 @@ class RecoveryRuntimeTests(unittest.TestCase):
             flow.continuous_original_text[:] = original_text
             flow.continuous_audio[:] = audio
 
-    def test_startup_reuses_complete_assets_and_rebuilds_missing_icons(self):
+    def test_startup_reuses_fresh_icons_and_rebuilds_from_brand_art(self):
+        # Fresh icons already present: no rebuild of either kind.
         with (
             mock.patch.object(flow, "make_cues") as make_cues,
-            mock.patch.object(flow.os.path, "exists", return_value=True),
+            mock.patch.object(flow, "_brand_icons_stale", return_value=False),
+            mock.patch.object(flow, "build_brand_icons") as build,
             mock.patch.object(flow, "make_icon") as make_icon,
         ):
             flow.ensure_assets()
         make_cues.assert_called_once_with()
+        build.assert_not_called()
         make_icon.assert_not_called()
 
+        # A stale/missing icon with the brand art present: rebuild from the art,
+        # never fall back to the drawn icons.
         with (
             mock.patch.object(flow, "make_cues"),
-            mock.patch.object(
-                flow.os.path, "exists", side_effect=lambda path: path != flow.TRAY_ICON_FILE
-            ),
+            mock.patch.object(flow, "_brand_icons_stale", return_value=True),
+            mock.patch.object(flow, "build_brand_icons", return_value=True) as build,
+            mock.patch.object(flow, "make_icon") as make_icon,
+        ):
+            flow.ensure_assets()
+        build.assert_called_once_with()
+        make_icon.assert_not_called()
+
+        # Icons missing and the brand art absent: draw the fallback icons.
+        with (
+            mock.patch.object(flow, "make_cues"),
+            mock.patch.object(flow, "_brand_icons_stale", return_value=True),
+            mock.patch.object(flow, "build_brand_icons", return_value=False),
+            mock.patch.object(flow.os.path, "exists", return_value=False),
             mock.patch.object(flow, "make_icon") as make_icon,
         ):
             flow.ensure_assets()
