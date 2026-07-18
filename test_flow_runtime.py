@@ -455,6 +455,48 @@ class DeliveryTests(unittest.TestCase):
         self.assertLessEqual(overlay.partial_font.measure(fitted), 80)
         self.assertNotIn("\n", fitted)
 
+    def test_overlay_text_owns_the_pill_until_the_latest_phrase_expires(self):
+        overlay = flow.Overlay.__new__(flow.Overlay)
+        overlay.canvas = mock.Mock()
+        overlay.root = mock.Mock()
+        overlay.partial_font = mock.Mock()
+        overlay.partial_font.measure.side_effect = lambda value: len(value) * 8
+        overlay.partial_max_width = 160
+        overlay.partial_text = "partial-text"
+        overlay.partial_bg = "partial-bg"
+        overlay.curves = ["curve-1", "curve-2"]
+        overlay.tips = ["tip-1", "tip-2"]
+        overlay.amps = [3.0, 2.0]
+        overlay.partial_generation = 0
+        overlay._redraw_curves = mock.Mock()
+
+        overlay._show_partial("first phrase", duration=100)
+        first_timeout = overlay.root.after.call_args.args[1]
+        overlay._show_partial("second phrase", duration=100)
+        second_timeout = overlay.root.after.call_args.args[1]
+
+        for item in overlay.curves + overlay.tips:
+            self.assertIn(
+                mock.call(item, state="hidden"),
+                overlay.canvas.itemconfigure.call_args_list,
+            )
+
+        overlay.canvas.reset_mock()
+        first_timeout()
+        overlay.canvas.itemconfigure.assert_not_called()
+
+        second_timeout()
+        self.assertIn(
+            mock.call("partial-text", state="hidden"),
+            overlay.canvas.itemconfigure.call_args_list,
+        )
+        for item in overlay.curves + overlay.tips:
+            self.assertIn(
+                mock.call(item, state="normal"),
+                overlay.canvas.itemconfigure.call_args_list,
+            )
+        self.assertEqual(overlay.amps, [0.0, 0.0])
+
     def test_delivery_precedes_history_and_survives_history_failure(self):
         calls = []
 

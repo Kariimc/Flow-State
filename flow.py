@@ -2075,13 +2075,14 @@ class Overlay:
                 fill=self.CURVE_COLORS[i], outline="",
             )
         self.partial_bg = self.canvas.create_rectangle(
-            25, 4, self.W - 5, self.H - 4, fill=PAPER, outline="",
+            19, 4, self.W - 5, self.H - 4, fill=PAPER, outline="",
             state="hidden",
         )
         self.partial_font = tkfont.Font(
             root=self.root, family="Segoe UI", size=8,
         )
         self.partial_max_width = self.W - 42
+        self.partial_generation = 0
         self.partial_text = self.canvas.create_text(
             31, mid, text="", anchor="w", fill="#6f685c",
             font=self.partial_font, state="hidden",
@@ -2269,17 +2270,35 @@ class Overlay:
             suffix = suffix[1:]
         return "..." + suffix
 
+    def _set_waveform_visible(self, visible: bool) -> None:
+        state = "normal" if visible else "hidden"
+        for item in self.curves + self.tips:
+            self.canvas.itemconfigure(item, state=state)
+
     def _show_partial(self, text: str, duration: int = 1800):
+        self.partial_generation += 1
+        generation = self.partial_generation
         fitted = self._fit_partial_text(text)
+        self._set_waveform_visible(False)
         self.canvas.itemconfigure(self.partial_text, text=fitted, state="normal")
         self.canvas.itemconfigure(self.partial_bg, state="normal")
         self.canvas.tag_raise(self.partial_bg)
         self.canvas.tag_raise(self.partial_text)
-        self.root.after(duration, self._hide_partial)
+        self.root.after(
+            duration,
+            lambda current=generation: self._hide_partial(current),
+        )
 
-    def _hide_partial(self):
+    def _hide_partial(self, generation: int | None = None):
+        if generation is not None and generation != self.partial_generation:
+            return
+        if generation is None:
+            self.partial_generation += 1
         self.canvas.itemconfigure(self.partial_bg, state="hidden")
         self.canvas.itemconfigure(self.partial_text, state="hidden")
+        self.amps = [0.0] * len(self.amps)
+        self._redraw_curves()
+        self._set_waveform_visible(True)
 
     def _poll(self):
         try:

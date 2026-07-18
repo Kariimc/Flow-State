@@ -6,13 +6,15 @@ window. No audio leaves the machine. The app uses three production modules:
 `flow.py` for capture/delivery, `flow_features.py` for durable data and text
 features, and `flow_hub.py` for the standard-library Tk UI.
 
-Status: Accuracy Learning is merged and pushed to main at 3a80d55. The exact
-merged tree passed all 120 tests in 89.931s, including 19 native Tk tests, and
-all eight Python/test/benchmark files compile. The old PID 12844 closed through
-Flow State's own IPC quit command, and the merged build is now resident as PID
-23372. A separate IPC hub request returned True, confirming the running
-single-instance server. PROGRESS.md records the feature boundaries and next
-evidence step.
+Status: candidate branch `fix/waveform-text-transition` is ready for fresh merge
+approval. It makes waveform and rendered text mutually exclusive pill phases,
+uses a generation-bound timeout so stale phrases cannot hide newer text, and
+restores the waveform from a flat baseline. Appearance now previews the real
+Desktop/Hub and tray icon assets. All 122 tests passed in 83.810s, including 20
+native Tk tests; all eight Python/test/benchmark files compile; browser review
+confirmed both visual states and clean consoles. PID 23372 is still the previous
+merged `main` build until approval, merge, and a controlled IPC restart. The
+three existing local review artifacts remain untracked and excluded.
 
 ---
 

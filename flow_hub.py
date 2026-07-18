@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox
 
 import numpy as np
 import pyperclip
+from PIL import Image, ImageTk
 
 
 LIGHT = {
@@ -812,6 +813,39 @@ class Hub:
         self.meter.create_rectangle(0, 0, int(150 * level), 10, fill=color, outline="")
         self.flash("Microphone heard you" if level > 0.05 else "No voice detected")
 
+    def _icon_family_sample(self, host):
+        frame = tk.Frame(host, bg=self.colors["paper"])
+        self._appearance_images = []
+        for path, label in (
+            (self.app.ICON_FILE, "Desktop + Hub"),
+            (self.app.TRAY_ICON_FILE, "Tray"),
+        ):
+            item = tk.Frame(frame, bg=self.colors["paper"])
+            item.pack(side="left", padx=(0, 16))
+            try:
+                with Image.open(path) as source:
+                    image = source.convert("RGBA").resize(
+                        (32, 32),
+                        Image.Resampling.LANCZOS,
+                    )
+                photo = ImageTk.PhotoImage(image, master=self.top)
+                self._appearance_images.append(photo)
+                tk.Label(
+                    item, image=photo, bg=self.colors["paper"],
+                    borderwidth=0,
+                ).pack(side="left")
+            except (OSError, tk.TclError):
+                tk.Label(
+                    item, text="F", width=2,
+                    font=("Bodoni MT Black", 16, "bold"),
+                    fg=self.colors["brand"], bg=self.colors["paper"],
+                ).pack(side="left")
+            tk.Label(
+                item, text=label, font=("Segoe UI Semibold", 8),
+                fg=self.colors["muted"], bg=self.colors["paper"],
+            ).pack(side="left", padx=(6, 0))
+        return frame
+
     def _page_appearance(self):
         self._intro("Keep the paper-and-ink identity while tuning the Hub and floating pill.")
         section = self._section("Hub")
@@ -829,14 +863,11 @@ class Hub:
             font=("Segoe UI", 8), fg=self.colors["muted"], bg=self.colors["paper"],
             justify="left", wraplength=600,
         ).pack(anchor="w", padx=16, pady=(4, 12))
-        section = self._section("App icon")
+        section = self._section("Icon family")
         self._row(
-            section, "One icon everywhere",
-            "Desktop shortcut, Hub title bar, and system tray use models/flow.ico.",
-            lambda host: tk.Label(
-                host, text="Waveform icon", fg=self.colors["brand"],
-                bg=self.colors["paper"], font=("Segoe UI Semibold", 9),
-            ),
+            section, "Desktop, Hub, and tray",
+            "The foreground F and microphone share one polished visual system.",
+            self._icon_family_sample,
         )
 
     def _page_privacy(self):
