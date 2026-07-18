@@ -162,10 +162,30 @@ so all six stay visible. Drawn once at init; the animation only calls
 earlier version choppy). ~33 fps via `after(30, ...)`. The pill fades out after
 `IDLE_FADE` seconds and never steals keyboard focus (WS_EX_NOACTIVATE).
 
-**Icons** (`make_icon`): `models/flow.ico` is the graph-paper waveform desktop
-and Hub icon with a foreground F. `models/flow-tray.ico` is a separate gray
-microphone with the same F fitted inside its capsule. Tray state tinting derives
-from that microphone artwork.
+**Brand art** (`assets/`): the shipped source art lives in `assets/` as the
+committed brand source of truth — the diamond-topped chrome **F** wordmark, the
+desktop app icon (graph-paper waveform on a dark rounded square), the tray
+crystal, the light/dark pills, and the standalone waveform. Each was exported as
+a JPEG with a baked-in transparency checkerboard; `assets/build_assets.py` keys
+that out to real alpha (colour-key for isolated subjects, shape mask for the
+framed icon/pills) and writes the clean transparent PNGs alongside the sources.
+
+**Icons**: `models/flow.ico` (desktop/Hub) and `models/flow-tray.ico` (tray) are
+built at startup from `assets/flow-icon.png` and `assets/flow-tray.png` by
+`build_brand_icons()`, rebuilt whenever the source PNG is newer than the `.ico`.
+If the brand PNGs are missing, `make_icon()` still draws the original vector
+icons as a fallback. The `.ico` files stay generated (gitignored) under
+`models/`. Tray state tinting derives from the tray artwork as before.
+
+**Hub header**: the F wordmark is shown at the left of the Hub header
+(`flow_hub.Hub`), loaded from the pre-sized `assets/flow-wordmark-72.png`
+(Tk's `PhotoImage` cannot scale). Absent art falls back to the text titles.
+
+**Overlay pill** (`Overlay`): still the live, voice-reactive vector pill — six
+octave curves animated per frame, not a static image. The `assets/pill-*.png`
+and `assets/waveform.png` art is committed for brand use but intentionally does
+not replace the reactive overlay (a 190×26 static bitmap would drop the live
+waveform, the app's signature; see build notes).
 
 ---
 
@@ -253,6 +273,8 @@ Committed:
 - `run.vbs` — launches it without a console window.
 - `setup.ps1` — creates the venv and downloads models.
 - `requirements.txt` — Python deps.
+- `assets/` — committed brand art: source JPEGs, clean transparent PNGs, and
+  `build_assets.py` (regenerates the PNGs and the two `.ico` files).
 - `dictionary.txt`, `vocabulary.txt` — tracked starter content; review personal
   entries before pushing.
 - `README.md` — user guide. `RESEARCH.md` — the research. `PROGRESS.md` — working
