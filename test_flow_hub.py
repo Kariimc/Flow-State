@@ -233,6 +233,20 @@ class HubControlTests(unittest.TestCase):
         flow.set_autostart.assert_called_once()
         footer["Reset page"].invoke()
 
+    def test_appearance_uses_the_real_icon_family(self):
+        self.hub.show_page("appearance")
+        self.root.update_idletasks()
+        labels = []
+        pending = [self.hub.page]
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if isinstance(widget, tk.Label):
+                labels.append(widget.cget("text"))
+        self.assertIn("Desktop + Hub", labels)
+        self.assertIn("Tray", labels)
+        self.assertEqual(len(self.hub._appearance_images), 2)
+
     def test_history_correction_creates_reviewable_pair_without_overwriting_final(self):
         flow.HISTORY.records = [{
             "id": "record-1",

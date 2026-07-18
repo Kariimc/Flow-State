@@ -154,7 +154,7 @@ capture is available when Windows exposes a Stereo Mix input device.
 
 ## Performance Check
 
-The current `main` suite contains 120 tests, including 19 native Tk page/button
+The current suite contains 122 tests, including 20 native Tk page/button
 tests. Run it in one process before and after a code change:
 
 ```powershell

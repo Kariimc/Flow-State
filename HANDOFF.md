@@ -13,8 +13,11 @@ restores the waveform from a flat baseline. Appearance now previews the real
 Desktop/Hub and tray icon assets. All 122 tests passed in 83.810s, including 20
 native Tk tests; all eight Python/test/benchmark files compile; browser review
 confirmed both visual states and clean consoles. PID 23372 is still the previous
-merged `main` build until approval, merge, and a controlled IPC restart. The
-three existing local review artifacts remain untracked and excluded.
+merged `main` build until approval, merge, and a controlled IPC restart.
+
+Accuracy-lab artifacts are now committed on this branch: `accuracy-native-smoke.png`,
+`flow-state-accuracy-lab-preview.html`, `ui_accuracy_smoke_temp.py`, plus added
+`test_flow_hub.py` coverage and PROGRESS/README notes.
 
 ---
 
