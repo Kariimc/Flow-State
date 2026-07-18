@@ -843,6 +843,12 @@ def ipc_send(msg: str) -> bool:
 ICON_FILE = os.path.join(BASE_DIR, "models", "flow.ico")
 TRAY_ICON_FILE = os.path.join(BASE_DIR, "models", "flow-tray.ico")
 
+# Shipped brand art (committed). The .ico files above are built from these at
+# startup; make_icon() below is the drawn fallback when the art is absent.
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+ICON_SOURCE = os.path.join(ASSETS_DIR, "flow-icon.png")
+TRAY_SOURCE = os.path.join(ASSETS_DIR, "flow-tray.png")
+
 
 def _icon_font(size: int):
     from PIL import ImageFont
@@ -997,11 +1003,50 @@ def make_cues() -> None:
         pass
 
 
+def build_brand_icons() -> bool:
+    """Build models/flow.ico and models/flow-tray.ico from the shipped brand
+    PNGs in assets/. Returns False when the art is missing or PIL fails, so the
+    caller can fall back to the drawn icons."""
+    from PIL import Image
+
+    plans = (
+        (ICON_SOURCE, ICON_FILE,
+         [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)]),
+        (TRAY_SOURCE, TRAY_ICON_FILE,
+         [(256, 256), (64, 64), (48, 48), (32, 32), (16, 16)]),
+    )
+    if not all(os.path.exists(src) for src, _, _ in plans):
+        return False
+    try:
+        for src, dest, sizes in plans:
+            img = Image.open(src).convert("RGBA")
+            side = max(img.size)
+            canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+            canvas.alpha_composite(img, ((side - img.size[0]) // 2,
+                                         (side - img.size[1]) // 2))
+            canvas.save(dest, sizes=sizes)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _brand_icons_stale() -> bool:
+    """True when an .ico is missing or its source art has changed since."""
+    for src, dest in ((ICON_SOURCE, ICON_FILE), (TRAY_SOURCE, TRAY_ICON_FILE)):
+        if not os.path.exists(dest):
+            return True
+        if os.path.exists(src) and os.path.getmtime(src) > os.path.getmtime(dest):
+            return True
+    return False
+
+
 def ensure_assets() -> None:
     """Create startup assets only when the shipped files are missing."""
     make_cues()
-    if not all(os.path.exists(path) for path in (ICON_FILE, TRAY_ICON_FILE)):
-        make_icon()
+    icons_present = all(os.path.exists(p) for p in (ICON_FILE, TRAY_ICON_FILE))
+    if _brand_icons_stale():
+        if not build_brand_icons() and not icons_present:
+            make_icon()
 
 
 def beep(start: bool) -> None:

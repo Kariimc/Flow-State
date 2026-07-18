@@ -245,8 +245,21 @@ class Hub:
         self.header = tk.Frame(self.content, bg=c["paper"], height=108)
         self.header.pack(fill="x")
         self.header.pack_propagate(False)
+        # Brand wordmark (the diamond-topped F), shipped pre-sized because Tk's
+        # PhotoImage cannot scale. Absent art just leaves the text titles.
+        self._header_logo = None
+        logo_path = os.path.join(self.app.ASSETS_DIR, "flow-wordmark-72.png")
+        if os.path.exists(logo_path):
+            try:
+                self._header_logo = tk.PhotoImage(file=logo_path)
+                tk.Label(
+                    self.header, image=self._header_logo, bg=c["paper"],
+                ).pack(side="left", padx=(26, 0))
+            except tk.TclError:
+                self._header_logo = None
         titles = tk.Frame(self.header, bg=c["paper"])
-        titles.pack(side="left", padx=28, pady=(17, 13))
+        titles.pack(side="left", padx=(14, 28) if self._header_logo else 28,
+                    pady=(17, 13))
         self.eyebrow = tk.Label(
             titles, text="FLOW STATE", font=("Segoe UI Semibold", 8),
             fg=c["muted"], bg=c["paper"],
